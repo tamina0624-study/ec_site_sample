@@ -58,6 +58,42 @@ ec_site_sample/
 
 ## アプリの仕組み
 
+### 構成図
+
+```mermaid
+flowchart TD
+    subgraph source["ソースと生成処理"]
+        products["src/products.json：商品情報"]
+        generator["scripts/generate-slides.mjs<br/>npm run generate"]
+        products -->|読み込み| generator
+    end
+
+    subgraph static["静的ファイルの配信"]
+        previews["public/previews/：表紙SVG"]
+        downloads["public/downloads/：PPTX"]
+    end
+
+    subgraph browser["ブラウザ内"]
+        app["Reactアプリ：src/main.tsx<br/>URLのハッシュで画面切替"]
+        storage["localStorage<br/>カート・直近100件のデモ注文履歴"]
+        payment["模擬決済：成功・失敗を選択<br/>実際の販売・請求なし"]
+        order["注文完了・注文履歴<br/>ダウンロードリンク"]
+        app <-->|保存・復元| storage
+        app -->|カートから購入操作| payment
+        payment -->|成功時に注文を作成| app
+        payment -->|失敗時にエラーを表示| app
+        app -->|保存した注文を表示| order
+    end
+
+    products -->|ビルド時にアプリへ組み込み| app
+    generator -->|生成| previews
+    generator -->|生成| downloads
+    previews -->|表紙画像を表示| app
+    order -->|公開URLから取得| downloads
+```
+
+バックエンドやデータベースはありません。PPTXの公開URLは購入操作なしでも利用でき、図のダウンロードリンクには購入権限を検証する処理はありません。
+
 ### 画面と商品情報
 
 バックエンドやデータベースを使わず、Reactでブラウザ内の画面と状態を管理します。`src/main.tsx` がURLのハッシュ（`#` 以降）を読み取り、`#home` は商品一覧、`#product/proposal` は商品詳細、`#cart` はカート、`#checkout` は模擬決済、`#order/注文ID` は注文完了、`#history` は注文履歴、`#guide` はご利用ガイドを表示します。
