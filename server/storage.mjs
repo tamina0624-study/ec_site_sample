@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import JSZip from 'jszip';
 
-export const TERMS_VERSION = 'local-2026-10-01';
+export {TERMS_VERSION} from './legal.mjs';
 export const MAX_FILE_SIZE = 50 * 1024 * 1024;
 export const hash = value => createHash('sha256').update(value).digest('hex');
 export function passwordHash(password, salt) {return scryptSync(password, salt, 64).toString('hex');}

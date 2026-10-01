@@ -27,6 +27,8 @@ test('検索・詳細・保存・決済失敗・成功・ダウンロード・�
  expect(await download.failure()).toBeNull();
  await page.reload();
  await expect(page.getByRole('link',{name:'ダウンロード ↓'})).toBeVisible();
+ await page.getByText('購入時に同意した利用規約・返金条件',{exact:true}).click();await expect(page.locator('details')).toContainText('local-2026-10-01');
+ await page.goto('/');await page.getByRole('link',{name:'購入済み・再取得',exact:true}).click();await expect(page.getByRole('link',{name:'ダウンロード ↓'})).toBeVisible();
  await page.getByRole('link',{name:'カート 0'}).click();
  await expect(page.getByRole('heading',{name:'カートは空です'})).toBeVisible();
  await page.goto('/#guide');

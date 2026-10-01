@@ -18,4 +18,19 @@ test('お気に入り・並び替え・問い合わせ・管理画面・ロー�
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.getByRole('button',{name:'運用・分析',exact:true}).click();await expect(page.getByRole('heading',{name:'運用状況'})).toBeVisible();
  await page.getByRole('button',{name:'ログアウト'}).click();await expect(page.getByRole('button',{name:'管理者ログイン'})).toBeVisible();
+ await page.locator('select[name=role]').selectOption('editor');await page.getByLabel('管理用パスワード').fill('local-test-editor-only');await page.getByRole('button',{name:'管理者ログイン'}).click();
+ await expect(page.getByRole('button',{name:'認証設定',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'注文・返金',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'ログアウト'}).click();await expect(page.getByRole('button',{name:'管理者ログイン'})).toBeVisible();
+});
+
+test('模擬返金は再認証し、返金後に再購入できる',async({page})=>{
+ await page.goto('/');await page.getByRole('button',{name:'営業提案スライドをカートに追加',exact:true}).click();await page.goto('/#checkout');
+ await page.getByRole('checkbox',{name:'利用規約・利用許諾'}).check();await page.getByRole('button',{name:'デモ購入を確定する'}).click();await expect(page.getByRole('heading',{name:'デモ購入が完了しました。'})).toBeVisible();
+ const order=(await page.locator('.order-id').innerText()).split('\n')[0].replace('注文番号：','');
+ await page.goto('/#admin');await page.getByLabel('管理用パスワード').fill('local-test-admin-only');await page.getByRole('button',{name:'管理者ログイン'}).click();await page.getByRole('button',{name:'注文・返金',exact:true}).click();
+ await page.getByLabel('注文検索').fill(order);await page.getByRole('button',{name:'検索',exact:true}).click();const panel=page.locator('article.panel').filter({hasText:order});await expect(panel).toHaveCount(1);
+ await panel.getByLabel('返金理由').fill('ローカル再認証の検証');await panel.getByLabel('返金確認用パスワード').fill('incorrect-test-password');page.once('dialog',d=>d.accept());await panel.getByRole('button',{name:'全額模擬返金'}).click();await expect(page.getByRole('alert')).toContainText('確認番号');await expect(panel).toContainText('paid');
+ await panel.getByLabel('返金確認用パスワード').fill('local-test-admin-only');page.once('dialog',d=>d.accept());await panel.getByRole('button',{name:'全額模擬返金'}).click();await expect(page.getByRole('status').filter({hasText:'模擬返金しました'})).toBeVisible();await expect(panel).toContainText('refunded');
+ await page.goto('/#order/'+order);await expect(page.getByRole('heading',{name:'デモ注文は返金済みです。'})).toBeVisible();await expect(page.getByRole('link',{name:'ダウンロード ↓'})).toHaveCount(0);
+ await page.goto('/');await expect(page.getByRole('button',{name:'営業提案スライドをカートに追加',exact:true})).toBeEnabled();
 });

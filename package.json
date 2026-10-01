@@ -12,7 +12,8 @@
     "backup": "node scripts/local-data.mjs backup",
     "restore": "node scripts/local-data.mjs restore",
     "admin:reset": "node scripts/local-data.mjs admin-reset",
-    "test:server": "node --test tests/server.test.mjs"
+    "test:server": "node --test tests/server.test.mjs",
+    "admin:otp": "node scripts/local-data.mjs admin-code"
   },
   "dependencies": {
     "jszip": "^3.10.2",

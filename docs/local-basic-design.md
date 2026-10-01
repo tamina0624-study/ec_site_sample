@@ -8,8 +8,13 @@
 | --- | --- |
 | `src/main.tsx` | 店舗、カート、見積もり、同意、模擬購入、注文履歴、ダウンロード |
 | `src/LocalPages.tsx` | 管理者ログイン、商品・注文・返金・問い合わせ・通知・運用画面、販売条件 |
+| `src/AdminSecurity.tsx` | MFA設定・解除・復旧コードの表示 |
 | `src/api.ts` | APIの型、セッション初期化、CSRFヘッダー、ローカル分析イベント |
 | `server/shop.mjs` | APIルーティング、所有者・役割・状態の照合、価格・クーポン計算、通知の周期処理 |
+| `server/security.mjs` | TOTP・コードの再利用防止・復旧コード生成 |
+| `server/legal.mjs` | 販売条件本文と購入時の本文保存 |
+| `server/pagination.mjs` | 日時・IDによるカーソルの検証 |
+| `server/backups.mjs` | DB・ファイルのバックアップ、自動分の保持 |
 | `server/storage.mjs` | SQLiteの初期化、JSON文書の保存、商品取り込み、パスワードのハッシュ、PPTX検証・版固定 |
 | `vite.config.mjs` | 開発・プレビューへAPIを接続。私有ファイルの直接配信を禁止。プレビューで商品別HTMLを返す |
 | `scripts/local-data.mjs` | 手動バックアップ、検査付き復元、管理パスワード再発行 |
@@ -27,9 +32,9 @@ Node.js 24を使用します。商品はAPIから取得し、JSONは初期取り
 | `#order/注文ID`・`#history` | 注文完了・履歴・取得リンク | 同じブラウザの注文 |
 | `#guide`・`#contact` | ガイド・問い合わせ | 公開 |
 | `#legal/terms`・`#legal/privacy`・`#legal/refund`・`#legal/commerce` | 規約・個人情報・返金・特商法の準備用ページ | 公開、実販売者情報は未設定 |
-| `#admin` | 管理者ログイン・各管理タブ | adminは全機能、editorは商品操作のみ |
+| `#admin` | 管理者ログイン・各管理タブ | adminは全機能、editorは商品操作・自身の認証設定 |
 
-購入者はメール本人確認済みの会員ではなく、Cookieで識別するブラウザです。購入者セッションは30日、管理ログインは1時間で失効します。パスワードは初回にローカルファイルへ生成し、DBにはsalt付きscryptのハッシュを保存します。更新APIには `X-CSRF-Token` が必要です。管理者MFA・返金時の再認証は未実装です。
+購入者はメール本人確認済みの会員ではなく、Cookieで識別するブラウザです。購入者セッションは30日、管理ログインは1時間で失効します。パスワードは初回にローカルファイルへ生成し、DBにはsalt付きscryptのハッシュを保存します。更新APIには `X-CSRF-Token` が必要です。役割ごとに任意のTOTP MFAを設定できます。30秒・6桁・前後1ステップを許容し、使用済みステップを拒否します。復旧コード8個はハッシュ保存し、各1回のみ使用できます。設定待ちは5分有効。設定確定時に同じ役割の他セッションを解除します。返金はパスワードと設定済みMFAで再認証し、5分有効です。editorもログアウト・自身の認証設定が可能です。
 
 ## SQLiteの実テーブル
 
@@ -46,13 +51,13 @@ Node.js 24を使用します。商品はAPIから取得し、JSONは初期取り
 | download_tokens | token_hash、session_id、order_id、product_id、expires。取得時にも照合 |
 | metrics | day、event、count。UTC日付とイベントの組合せ一意 |
 
-`documents.kind` は `products`、`versions`、`quotes`、`orderMeta`、`credentials`、`coupons`、`inquiries`、`notifications`、`audit`、`errors` です。商品、状態、通知をそれぞれ独立した専用テーブルへ正規化する設計は本番向けの拡張案です。
+`documents.kind` は `products`、`versions`、`quotes`、`orderMeta`、`credentials`、`coupons`、`inquiries`、`notifications`、`audit`、`errors`、`mfaPending`、`reauth`、`maintenance` です。商品、状態、通知をそれぞれ独立した専用テーブルへ正規化する設計は本番向けの拡張案です。
 
-`orderMeta` にはstatus、terms、acceptedAt、discount、購入時のlines（商品ID・名称・価格・ファイル版）、購入商品IDを保存します。明細のpriceは単品価格で、セット・割引後の支払総額はorders.totalが正本です。税額の計算・税区分・利用許諾本文の購入時保存・領収書は未実装です。
+`orderMeta` にはstatus、terms、acceptedAt、discount、購入時のlines（商品ID・名称・価格・ファイル版）、購入商品IDを保存します。明細のpriceは単品価格で、セット・割引後の支払総額はorders.totalが正本です。`licenseSnapshot` に規約版と利用規約・返金条件の本文を保存します。旧注文に本文がなければ後から当時の本文を捏造しません。税額の計算・税区分・領収書は未実装です。
 
 ## 現行API
 
-GETもブラウザセッションを利用します。更新処理はセッションAPIのCSRFトークンを付けます。エラー形式は `{ message }`。400入力不正、401管理パスワード不一致、403権限・CSRF、404不存在・所有者不一致・権限停止、409失効・変更・競合、413サイズ超過、429回数制限、500処理障害を返します。購入履歴は直近100件、管理注文検索と監査表示は最大500件で、カーソルページングは未実装です。
+GETもブラウザセッションを利用します。更新処理はセッションAPIのCSRFトークンを付けます。エラー形式は `{ code, message, requestId, details? }`、ヘッダーは `X-Request-Id`。確認番号を画面とerrors文書へ記録します。取得トークンをエラー記録へ残しません。400入力不正、401管理パスワード不一致、403権限・CSRF、404不存在・所有者不一致・権限停止、409失効・変更・競合、413サイズ超過、429回数制限、500処理障害を返します。購入履歴・管理注文・監査は `{ items, nextCursor }`。limitは既定20・最大100。日時降順とID降順によるSQLのキーセット方式で、同時刻の行も欠落・重複しません。cursorは日時とIDのBase64url JSONで、不正な値は400です。
 
 | メソッド・パス | 入出力・役割 |
 | --- | --- |
@@ -62,13 +67,18 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 | GET・POST /api/favorites、DELETE /api/favorites/:id | お気に入り取得・登録・削除 |
 | POST /api/metrics | view、cart、checkout。購入件数は注文確定時にサーバーで記録 |
 | POST /api/quotes | items、coupon → id、価格内訳、lines、期限、terms |
-| GET /api/orders | 自分の注文、購入時明細、状態 |
+| GET /api/orders、GET /api/orders/:id | ページ化した自分の注文、所有者限定の個別取得 |
+| GET /api/purchases | 全paid注文から購入済み商品と再取得先を取得 |
+| GET /api/legal | 規約版と販売条件本文 |
 | POST /api/orders | quoteId、result、accepted、termsVersion。Idempotency-Key必須 |
 | DELETE /api/orders | 自分のデモ注文と取得トークンを削除 |
 | POST /api/orders/:id/download-links/:productId | 同じブラウザのpaid注文から5分有効のurl・expiresAtを発行 |
 | GET /api/downloads/:token | 期限、ブラウザ、注文状態を照合して購入時のPPTXを配信 |
 | POST /api/inquiries | email、category、body、任意の自分のorderId → 受付id |
-| POST /api/admin/login、POST /api/admin/logout | パスワード・任意のroleで管理ログイン、CSRF更新、ログアウト |
+| POST /api/admin/login、POST /api/admin/logout | パスワード・任意のrole・設定済みMFAのcodeで管理ログイン、CSRF更新、ログアウト |
+| POST /api/admin/reauth | パスワード・設定済みMFAで5分の返金再認証 |
+| GET /api/admin/security/status | 自分の役割のMFA状態・復旧コード残数 |
+| POST /api/admin/security/mfa/setup、confirm、disable | パスワードで準備、コードで確定、再認証して解除 |
 | GET・POST /api/admin/products、PATCH /api/admin/products/:id | 商品一覧・新規登録・revision付き編集 |
 | POST /api/admin/products/:id/file | revision、base64のPPTX。検証して商品版を更新 |
 | GET /api/admin/orders?q=検索語 | 注文番号・商品名・状態の検索 |
@@ -80,7 +90,7 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 | POST /api/admin/notifications/:id/retry | 試行回数を戻し、再処理を予約 |
 | GET /api/admin/audit、GET /api/admin/health | 管理操作履歴、DB・通知の状況と日別集計 |
 
-`/api/products/:id`、`/api/orders/:id`、Checkout・WebhookのAPI、外部ストレージのアップロードAPIは未実装です。個別の注文画面は履歴APIのデータから表示します。editorは商品管理APIだけを利用でき、返金・問い合わせ・通知・集計はadmin専用です。editorのログアウトAPIは現行の権限判定で拒否されるため、役割別ログアウトの修正は未対応です。
+`/api/products/:id`、Checkout・WebhookのAPI、外部ストレージのアップロードAPIは未実装です。個別の注文画面は所有者限定の詳細APIから表示します。editorの業務操作は商品管理に限定し、返金・問い合わせ・通知・集計はadmin専用です。editorもログアウト・認証設定・再認証を利用できますが、返金等のadmin専用操作は拒否します。
 
 ## 状態と業務処理
 
@@ -94,7 +104,7 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 
 商品はdraft／published／stopped。問い合わせはopen／handling／closed。通知はpending → savedで、5秒周期に期限の到来した予定通知を処理します。失敗の模擬では指数バックオフ、最大8回でfailed。手動retryでpendingへ戻します。savedは「ローカル保存完了」であり「外部メール送信成功」ではありません。通知IDは購入・返金・問い合わせごとに固定して重複作成を防ぎます。
 
-クーポンは期限・割引率・利用上限をサーバーで判定し、注文と同じトランザクションで消費します。返金しても利用回数は戻しません。購入済み商品の再購入防止・再ダウンロードへの自動案内は未実装です。
+クーポンは期限・割引率・利用上限をサーバーで判定し、注文と同じトランザクションで消費します。返金しても利用回数は戻しません。全paid注文を対象に購入済みを判定し、商品画面から元の注文へ案内します。セット内の一部でも購入済みなら重複購入を拒否します。見積もり時と注文確定時の両方で確認し、古い見積もりによる再購入も防ぎます。返金・リセット後は対象から外れます。
 
 ## 保護・運用・移行
 
@@ -108,8 +118,11 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 - `SHOP_DATA_DIR`、`SHOP_FILE_DIR`、`SHOP_BACKUP_DIR` で保存先を指定できる。`LOCAL_ADMIN_PASSWORD` と `LOCAL_EDITOR_PASSWORD` は資格情報の初回作成時のみ参照する。機密値をGitへ保存しない。
 - 商品別SEOはビルド時点の公開商品から生成する。DBが未初期化ならJSONを使う。既定のrobots.txtは全体のクロールを禁止。SITE_URLを指定したビルドでは通常のサイトマップを生成するが、これだけで本番運用の準備が完了するわけではない。
 
+- 自動バックアップは5秒周期の確認で初回と以後24時間ごと、直近7件を保持。停止中は実行しない。`SHOP_BACKUP_INTERVAL_MS=0` で無効、`SHOP_BACKUP_KEEP` は1〜365。自動分のみ削除し、手動分は保持する。失敗時は最大5分後に再試行し、maintenance文書と運用画面で状態を確認する。
+- バックアップはMFA秘密情報も含む。TOTPのローカル確認は `npm run admin:otp`（editorは `-- editor`）。同じ端末の生成は独立した第二要素ではない。紛失時のadmin:resetはMFA・復旧コードと管理セッションも解除する。
+
 ## 検証と今後の拡張
 
-`npm run build`、`npm run test:server`、`CHROMIUM_PATH=/usr/bin/chromium npm test` を使用します。2026年10月1日にPC／モバイル計12件、サーバーテスト1件、ビルド後プレビューを確認済み。ブラウザテストは一時DBとテスト用資格情報を使うため、普段の開発サーバーを停止してから実行します。
+`npm run build`、`npm run test:server`、`CHROMIUM_PATH=/usr/bin/chromium npm test` を使用します。2026年10月1日にPC／モバイル計14件、サーバーテスト4件、ビルド後プレビューを確認済み。ブラウザテストは一時DBとテスト用資格情報を使うため、普段の開発サーバーを停止してから実行します。
 
-今後はメール本人確認・端末間共有・MFA・実決済と入金照合・外部配信・本番ストレージ・税と領収書・販売者情報・マルウェア検査・外部監視・自動バックアップと保持期間を整備します。将来の専用テーブル、カーソルページング、codeとrequestId付きエラー、利用許諾本文のスナップショットは基本設計書の目標であり、現行実装との対応を確認して追加します。
+今後はメール本人確認・端末間共有・実決済と入金照合・外部配信・本番ストレージ・税と領収書・販売者情報・マルウェア検査・外部監視・別媒体へのバックアップ保管を整備します。カーソルページング、codeとrequestId付きエラー、利用許諾本文のスナップショットはローカル実装済みです。専用テーブルへの正規化は本番拡張案です。

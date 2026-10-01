@@ -1,23 +1,14 @@
-import { DatabaseSync, backup } from 'node:sqlite';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, renameSync, rmSync, chmodSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, renameSync, rmSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { createHash } from 'node:crypto';
+import {saveBackup as writeBackup} from '../server/backups.mjs';
 const dataDir=resolve(process.env.SHOP_DATA_DIR||'data');
 const filesDir=resolve(process.env.SHOP_FILE_DIR||'private/downloads');
 const backupsDir=resolve(process.env.SHOP_BACKUP_DIR||'backups');
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const command=process.argv[2];
-async function saveBackup(){
- if(!existsSync(resolve(dataDir,'shop.sqlite')))throw new Error('先にnpm run devでデータベースを作成してください。');
- const name=`backup-${new Date().toISOString().replace(/[:.]/g,'-')}-${process.pid}`;
- const target=resolve(backupsDir,name);mkdirSync(resolve(target,'versions'),{recursive:true,mode:0o700});
- const db=new DatabaseSync(resolve(dataDir,'shop.sqlite'));
- try{await backup(db,resolve(target,'shop.sqlite'));}finally{db.close();}
- chmodSync(resolve(target,'shop.sqlite'),0o600);
- const entries=[];for(const filename of readdirSync(resolve(filesDir,'versions'))){if(!/^[a-f0-9]{64}\.pptx$/.test(filename))continue;const bytes=readFileSync(resolve(filesDir,'versions',filename));if(digest(bytes)!==filename.slice(0,-5))throw new Error('ファイルの整合性を確認できません。');copyFileSync(resolve(filesDir,'versions',filename),resolve(target,'versions',filename));entries.push({name:filename,checksum:digest(bytes)});}
- writeFileSync(resolve(target,'manifest.json'),JSON.stringify({version:1,date:new Date().toISOString(),database:digest(readFileSync(resolve(target,'shop.sqlite'))),files:entries},null,2),{mode:0o600});
- console.log(`バックアップ：${target}`);return target;
-}
+async function saveBackup(){const result=await writeBackup({dataDir,fileDir:filesDir,backupsDir});console.log(`バックアップ：${result.path}`);return result.path;}
 async function restoreBackup(){
  const supplied=process.argv[3];if(!supplied)throw new Error('npm run restore -- バックアップ名 を指定してください。');
  const target=resolve(backupsDir,basename(supplied));
@@ -41,6 +32,9 @@ try{
  else if(command==='admin-reset'){
   const {randomBytes}=await import('node:crypto');const {passwordHash}=await import('../server/storage.mjs');
   const pidFile=resolve(dataDir,'server.pid');if(existsSync(pidFile)){let alive=false;try{process.kill(Number(readFileSync(pidFile,'utf8')),0);alive=true;}catch{}if(alive)throw new Error('サーバーを停止してください。');}
-  const db=new DatabaseSync(resolve(dataDir,'shop.sqlite'));try{for(const role of ['admin','editor']){const password=randomBytes(24).toString('base64url'),salt=randomBytes(16).toString('hex');db.prepare("UPDATE documents SET value=? WHERE kind='credentials' AND id=?").run(JSON.stringify({salt,digest:passwordHash(password,salt)}),role);writeFileSync(resolve(dataDir,role+'-password.txt'),password+'\n',{mode:0o600});}db.prepare("UPDATE local_sessions SET role='guest'").run();}finally{db.close();}console.log('管理パスワードをdataディレクトリに再発行しました。');
- }else throw new Error('backup / restore / admin-reset を指定してください。');
+  const db=new DatabaseSync(resolve(dataDir,'shop.sqlite'));try{for(const role of ['admin','editor']){const password=randomBytes(24).toString('base64url'),salt=randomBytes(16).toString('hex');db.prepare("UPDATE documents SET value=? WHERE kind='credentials' AND id=?").run(JSON.stringify({salt,digest:passwordHash(password,salt)}),role);writeFileSync(resolve(dataDir,role+'-password.txt'),password+'\n',{mode:0o600});}db.prepare("UPDATE local_sessions SET role='guest'").run();db.prepare("DELETE FROM documents WHERE kind IN ('mfaPending','reauth')").run();}finally{db.close();}console.log('管理パスワードを保存先ディレクトリに再発行しました。MFA設定も解除しました。');
+ }else if(command==='admin-code'){
+  const {totp}=await import('../server/security.mjs');const role=process.argv[3]==='editor'?'editor':'admin';
+  const db=new DatabaseSync(resolve(dataDir,'shop.sqlite'),{readOnly:true});try{const row=db.prepare("SELECT value FROM documents WHERE kind='credentials' AND id=?").get(role);const c=row?JSON.parse(row.value):null;const pending=db.prepare("SELECT value FROM documents WHERE kind='mfaPending' AND json_extract(value,'$.role')=? AND json_extract(value,'$.expires')>? ORDER BY json_extract(value,'$.expires') DESC LIMIT 1").get(role,Date.now());const secret=c?.totpSecret||(pending?JSON.parse(pending.value).secret:null);if(!secret)throw new Error('先に管理画面でMFA設定を開始してください。');console.log(totp(secret,Math.floor(Date.now()/30000)));console.log('ローカル確認用のコードです。一度使用したコードは次の更新まで再使用できません。');}finally{db.close();}
+ }else throw new Error('backup / restore / admin-reset / admin-code を指定してください。');
 }catch(e){console.error(e.message);process.exitCode=1;}

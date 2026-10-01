@@ -1,6 +1,6 @@
 import {test,expect,type APIRequestContext,type Playwright} from '@playwright/test';
 async function client(playwright:Playwright){const context=await playwright.request.newContext({baseURL:'http://127.0.0.1:5173'});let csrf=(await (await context.get('/api/session')).json()).csrf;
- return {context,async send(path:string,data:unknown={},method='POST',key?:string){const response=await context.fetch(path,{method,headers:{'X-CSRF-Token':csrf,...(key?{'Idempotency-Key':key}:{})},data});if(path.endsWith('/login')&&response.ok())csrf=(await response.json()).csrf;return response;}};
+ return {context,async send(path:string,data:unknown={},method='POST',key?:string){const response=await context.fetch(path,{method,headers:{'X-CSRF-Token':csrf,...(key?{'Idempotency-Key':key}:{})},data});if(['/api/admin/login','/api/admin/logout'].includes(path)&&response.ok())csrf=(await response.json()).csrf;return response;}};
 }
 async function quote(c:Awaited<ReturnType<typeof client>>,items=['proposal'],coupon=''){const r=await c.send('/api/quotes',{items,coupon});expect(r.status()).toBe(200);return r.json();}
 const orderData=(q:{id:string;terms:string},result='success')=>({quoteId:q.id,termsVersion:q.terms,accepted:true,result});
@@ -19,7 +19,7 @@ test('サーバー価格・同意・CSRF・重複防止・所有者・リセッ�
   const link=await (await download(owner,order.id)).json();expect((await other.context.get(link.url)).status()).toBe(404);expect((await owner.context.get(link.url)).status()).toBe(200);
   expect((await owner.context.get('/private/downloads/proposal.pptx')).status()).toBe(403);
   expect((await owner.context.get('/downloads/proposal.pptx')).headers()['content-type']).not.toContain('presentationml');
-  const failureQuote=await quote(owner);expect((await owner.send('/api/orders',orderData(failureQuote,'failure'),'POST',crypto.randomUUID())).status()).toBe(402);
+  const failureQuote=await quote(owner,['sales']);expect((await owner.send('/api/orders',orderData(failureQuote,'failure'),'POST',crypto.randomUUID())).status()).toBe(402);
   expect((await owner.send('/api/quotes',{items:['../secret']})).status()).toBe(400);
   await owner.send('/api/orders',{},'DELETE');expect((await owner.context.get(link.url)).status()).toBe(404);
  }finally{await owner.context.dispose();await other.context.dispose();}
@@ -48,7 +48,9 @@ test('管理権限・価格変更・クーポン・セット・版固定・模�
   const replacement=readFileSync('private/downloads/sales.pptx');p=await (await admin.send(`/api/admin/products/${productId}/file`,{revision:p.revision,base64:replacement.toString('base64')})).json();
   expect(await (await owner.context.get(savedLink.url)).body()).toEqual(original);
   const bundle=await admin.send('/api/admin/products',{...product,id:bundleId,name:'検証セット',price:800,status:'published',bundle:[productId,'research']});expect(bundle.status()).toBe(200);
-  const bq=await quote(owner,[bundleId]);expect(bq.total).toBe(800);expect(bq.lines.map((i:{product_id:string})=>i.product_id)).toEqual([productId,'research']);
+  const bq=await quote(editor,[bundleId]);expect(bq.total).toBe(800);expect(bq.lines.map((i:{product_id:string})=>i.product_id)).toEqual([productId,'research']);
+  expect((await admin.send(`/api/admin/orders/${o.id}/refund`,{reason:'動作確認'})).status()).toBe(403);
+  expect((await admin.send('/api/admin/reauth',{password:'local-test-admin-only'})).status()).toBe(200);
   expect((await admin.send(`/api/admin/orders/${o.id}/refund`,{reason:'動作確認'})).status()).toBe(200);
   expect((await admin.send(`/api/admin/orders/${o.id}/refund`,{reason:'再送'})).status()).toBe(200);
   expect((await owner.context.get(savedLink.url)).status()).toBe(404);expect((await download(owner,o.id,productId)).status()).toBe(404);
@@ -56,7 +58,7 @@ test('管理権限・価格変更・クーポン・セット・版固定・模�
   expect((await admin.send(`/api/admin/inquiries/${inquiryId}`,{status:'closed'},'PATCH')).status()).toBe(200);
   await admin.send('/api/admin/notifications/run',{});
   const notices=await (await admin.context.get('/api/admin/notifications')).json();expect(notices.filter((n:{id:string})=>n.id.includes(o.id))).toHaveLength(2);expect(notices.some((n:{body:string;status:string})=>n.body.includes(o.id)&&n.status==='saved')).toBe(true);
-  const audits=await (await admin.context.get('/api/admin/audit')).json();expect(audits.filter((a:{action:string;target:string})=>a.action==='refund'&&a.target===o.id)).toHaveLength(1);
+  const audits=(await (await admin.context.get('/api/admin/audit?limit=100')).json()).items;expect(audits.filter((a:{action:string;target:string})=>a.action==='refund'&&a.target===o.id)).toHaveLength(1);
   await owner.send('/api/favorites',{productId});expect(await (await owner.context.get('/api/favorites')).json()).toContain(productId);
   await owner.send('/api/favorites/'+productId,{},'DELETE');expect(await (await owner.context.get('/api/favorites')).json()).not.toContain(productId);
   // 他のブラウザテストの商品件数に影響させない。
