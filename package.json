@@ -1,1 +1,30 @@
-{"name":"slide-market","version":"0.1.0","private":true,"type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"tsc --noEmit && vite build","preview":"vite preview --host 0.0.0.0","generate":"node scripts/generate-slides.mjs","test":"playwright test"},"dependencies":{"react":"^19.0.0","react-dom":"^19.0.0"},"devDependencies":{"@types/react":"^19.0.0","@types/react-dom":"^19.0.0","@playwright/test":"^1.50.0","typescript":"^5.7.0","vite":"^7.0.0","pptxgenjs":"^4.0.0"}}
+{
+  "name": "slide-market",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build && node scripts/generate-seo.mjs",
+    "preview": "vite preview --host 0.0.0.0",
+    "generate": "node scripts/generate-slides.mjs",
+    "test": "playwright test",
+    "backup": "node scripts/local-data.mjs backup",
+    "restore": "node scripts/local-data.mjs restore",
+    "admin:reset": "node scripts/local-data.mjs admin-reset",
+    "test:server": "node --test tests/server.test.mjs"
+  },
+  "dependencies": {
+    "jszip": "^3.10.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "pptxgenjs": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^7.0.0"
+  }
+}

@@ -13,6 +13,7 @@ test('検索・詳細・保存・決済失敗・成功・ダウンロード・�
  await expect(page.locator('.total')).toContainText('¥1,200');
  await page.getByRole('link',{name:'デモ購入へ進む'}).click();
  await page.getByRole('radio',{name:'失敗を試す'}).check();
+ await page.getByRole('checkbox',{name:'利用規約・利用許諾'}).check();
  await page.getByRole('button',{name:'デモ購入を確定する'}).click();
  await expect(page.getByRole('alert')).toContainText('失敗');
  await expect(page.locator('.cart-row')).toHaveCount(1);

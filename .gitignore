@@ -2,3 +2,6 @@ node_modules/
 dist/
 test-results/
 playwright-report/
+data/
+backups/
+private/downloads/versions/
