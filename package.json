@@ -12,8 +12,14 @@
     "backup": "node scripts/local-data.mjs backup",
     "restore": "node scripts/local-data.mjs restore",
     "admin:reset": "node scripts/local-data.mjs admin-reset",
-    "test:server": "node --test tests/server.test.mjs",
-    "admin:otp": "node scripts/local-data.mjs admin-code"
+    "test:server": "node --test tests/server.test.mjs tests/assets.test.mjs",
+    "admin:otp": "node scripts/local-data.mjs admin-code",
+    "assets:prepare": "node scripts/prepare-assets.mjs",
+    "tools:check": "node scripts/prepare-assets.mjs --check",
+    "backup:list": "node scripts/local-data.mjs backup-list",
+    "backup:check": "node scripts/local-data.mjs backup-check",
+    "restore:drill": "node scripts/local-data.mjs restore-drill",
+    "test:tools": "node --test tests/tools.test.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.2",

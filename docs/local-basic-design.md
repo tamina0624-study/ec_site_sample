@@ -11,6 +11,9 @@
 | `src/AdminSecurity.tsx` | MFA設定・解除・復旧コードの表示 |
 | `src/api.ts` | APIの型、セッション初期化、CSRFヘッダー、ローカル分析イベント |
 | `server/shop.mjs` | APIルーティング、所有者・役割・状態の照合、価格・クーポン計算、通知の周期処理 |
+| `server/assets.mjs` | ClamAV検査、外部変換ツール実行、画像キャッシュ |
+| `server/receipts.mjs` | 購入時の模擬領収書保存と印刷用HTML |
+| `scripts/prepare-assets.mjs` | 実行ファイル確認・既存ファイル版の準備 |
 | `server/security.mjs` | TOTP・コードの再利用防止・復旧コード生成 |
 | `server/legal.mjs` | 販売条件本文と購入時の本文保存 |
 | `server/pagination.mjs` | 日時・IDによるカーソルの検証 |
@@ -20,7 +23,7 @@
 | `scripts/local-data.mjs` | 手動バックアップ、検査付き復元、管理パスワード再発行 |
 | `scripts/generate-seo.mjs` | ビルド時の商品別HTML、メタ情報、構造化データ、サイトマップ、robots.txt |
 
-Node.js 24を使用します。商品はAPIから取得し、JSONは初期取り込みに使用します。PPTXは `private/downloads/versions/` に保存し、注文にはSHA-256のファイル版を記録します。プレビューはPPTX内の文字を最大12ページ分抜粋するSVGです。実際のスライドレイアウトの画像化は未実装です。
+Node.js 24を使用します。商品はAPIから取得し、JSONは初期取り込みに使用します。PPTXは `private/downloads/versions/` に保存し、注文にはSHA-256のファイル版を記録します。LibreOfficeでPDF化し、pdftoppmで最大12ページのPNGを生成します。data/previewsにSHA-256単位で保存し、公開商品のAPIから取得します。未導入・失敗・キャッシュ欠落時は文字抜粋SVGへ戻します。セットは先頭商品を表示します。プレビューのYu GothicはNoto Sans CJK JPへ置換します。元のPPTXは変更せず、フォントや描画はPowerPointと異なる場合があります。
 
 ## 画面と権限
 
@@ -53,7 +56,7 @@ Node.js 24を使用します。商品はAPIから取得し、JSONは初期取り
 
 `documents.kind` は `products`、`versions`、`quotes`、`orderMeta`、`credentials`、`coupons`、`inquiries`、`notifications`、`audit`、`errors`、`mfaPending`、`reauth`、`maintenance` です。商品、状態、通知をそれぞれ独立した専用テーブルへ正規化する設計は本番向けの拡張案です。
 
-`orderMeta` にはstatus、terms、acceptedAt、discount、購入時のlines（商品ID・名称・価格・ファイル版）、購入商品IDを保存します。明細のpriceは単品価格で、セット・割引後の支払総額はorders.totalが正本です。`licenseSnapshot` に規約版と利用規約・返金条件の本文を保存します。旧注文に本文がなければ後から当時の本文を捏造しません。税額の計算・税区分・領収書は未実装です。
+`orderMeta` にはstatus、terms、acceptedAt、discount、購入時のlines（商品ID・名称・価格・ファイル版）、購入商品IDを保存します。明細のpriceは単品価格で、セット・割引後の支払総額はorders.totalが正本です。`licenseSnapshot` に規約版と利用規約・返金条件の本文を保存します。旧注文に本文がなければ後から当時の本文を捏造しません。`receiptSnapshot` に購入時の単品／セット販売価格・小計・割引・合計・仮の10%税額を保存します。税額はfloor(total / 11)、税抜はtotalとの差額。実販売の税区分・適格請求書は未実装です。旧注文に領収書データがなければ生成しません。
 
 ## 現行API
 
@@ -67,6 +70,7 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 | GET・POST /api/favorites、DELETE /api/favorites/:id | お気に入り取得・登録・削除 |
 | POST /api/metrics | view、cart、checkout。購入件数は注文確定時にサーバーで記録 |
 | POST /api/quotes | items、coupon → id、価格内訳、lines、期限、terms |
+| GET /api/orders/:id/receipt | 所有者限定の模擬領収書HTML。download=1で保存、返金後は状態を明示 |
 | GET /api/orders、GET /api/orders/:id | ページ化した自分の注文、所有者限定の個別取得 |
 | GET /api/purchases | 全paid注文から購入済み商品と再取得先を取得 |
 | GET /api/legal | 規約版と販売条件本文 |
@@ -81,6 +85,7 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 | POST /api/admin/security/mfa/setup、confirm、disable | パスワードで準備、コードで確定、再認証して解除 |
 | GET・POST /api/admin/products、PATCH /api/admin/products/:id | 商品一覧・新規登録・revision付き編集 |
 | POST /api/admin/products/:id/file | revision、base64のPPTX。検証して商品版を更新 |
+| POST /api/admin/products/:id/prepare | revision指定で既存版を検査・PNG化。商品管理者も利用可能 |
 | GET /api/admin/orders?q=検索語 | 注文番号・商品名・状態の検索 |
 | POST /api/admin/orders/:id/refund | reason必須。注文単位で重複しない全額模擬返金 |
 | GET /api/admin/inquiries、PATCH /api/admin/inquiries/:id | 問い合わせ一覧、status更新 |
@@ -110,7 +115,7 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 
 - CookieはHttpOnly・SameSite=Strict。ローカルHTTPのためSecure属性は未設定。本番HTTPS対応は今後の実装。
 - 回数制限はメモリ上の1分窓。セッション全体300回、ログインは接続元IPで10回、問い合わせはセッション5回・IP30回、ダウンロードは発行と取得合算で30回、アップロード10回、分析60回。再起動でカウンタはリセットされる。
-- PPTXは50MB、ZIP展開合計100MB、1500エントリ、1〜200ページまで。マクロ・埋め込みファイル・危険なパスを拒否し、未検証のSVGはアップロードしない。マルウェア検査は未実装。
+- PPTXは50MB、ZIP展開合計100MB、1500エントリ、1〜200ページまで。マクロ・埋め込みファイル・危険なパスを拒否し、未検証のSVGはアップロードしない。ClamAV接続を実装。autoは実行ファイル不在なら未検査、requiredは未完了を拒否、offはdisabledとして記録する。定義不足・実行失敗は503、問題検出は400で登録を拒否する。既存の同じ版の検出結果も記録し、infectedは購入・公開・ダウンロード・プレビューを拒否する。
 - 初期SQLite版の注文には現在のファイルで版を固定する。過去時点の版は復元できない。既存Cookieを引き継ぐが、localStorageだけのデモ注文は移行しない。
 - リセットは自分のorders・items・取得トークンを削除し、orderMetaをresetにする。通知・問い合わせ・監査・お気に入りは残す。
 - `npm run backup` は稼働中もSQLiteのバックアップAPIを利用できる。`npm run restore -- バックアップ名` と `npm run admin:reset` はサーバー停止後に実行する。復元前に現在のデータも退避する。
@@ -121,8 +126,12 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 - 自動バックアップは5秒周期の確認で初回と以後24時間ごと、直近7件を保持。停止中は実行しない。`SHOP_BACKUP_INTERVAL_MS=0` で無効、`SHOP_BACKUP_KEEP` は1〜365。自動分のみ削除し、手動分は保持する。失敗時は最大5分後に再試行し、maintenance文書と運用画面で状態を確認する。
 - バックアップはMFA秘密情報も含む。TOTPのローカル確認は `npm run admin:otp`（editorは `-- editor`）。同じ端末の生成は独立した第二要素ではない。紛失時のadmin:resetはMFA・復旧コードと管理セッションも解除する。
 
+- 外部参照・XML実体を変換前に拒否する。変換はシェルを使わず実行し、各ツール90秒で打ち切る。管理APIの処理は同時に1件、競合はASSET_BUSY。変換は一時プロファイルでマクロを無効化するが、OS隔離は未実装。
+- `npm run backup:list` で一覧、`backup:check -- 名前` で検証、`restore:drill -- 名前` で一時領域へコピーして再検証する。稼働中のデータは変更しない。画像キャッシュはバックアップ対象外、必要なら復元後に再生成する。
+- ツール設定・検査モード・定義準備・復元確認は [ローカル運用手順](local-operations.md) を参照する。
+
 ## 検証と今後の拡張
 
-`npm run build`、`npm run test:server`、`CHROMIUM_PATH=/usr/bin/chromium npm test` を使用します。2026年10月1日にPC／モバイル計14件、サーバーテスト4件、ビルド後プレビューを確認済み。ブラウザテストは一時DBとテスト用資格情報を使うため、普段の開発サーバーを停止してから実行します。
+`npm run build`、`npm run test:server`、`CHROMIUM_PATH=/usr/bin/chromium npm test` を使用します。2026年10月1日にPC／モバイル計14件、サーバー・ファイル処理テスト10件、実無料ツール確認2件（24ページのPNG生成・ClamAVの無害な検証定義による検出）を確認済み。公式ウイルス定義の取得・更新はこの環境では未確認。ブラウザテストは一時DBとテスト用資格情報を使うため、普段の開発サーバーを停止してから実行します。
 
-今後はメール本人確認・端末間共有・実決済と入金照合・外部配信・本番ストレージ・税と領収書・販売者情報・マルウェア検査・外部監視・別媒体へのバックアップ保管を整備します。カーソルページング、codeとrequestId付きエラー、利用許諾本文のスナップショットはローカル実装済みです。専用テーブルへの正規化は本番拡張案です。
+今後はメール本人確認・端末間共有・実決済と入金照合・外部配信・本番ストレージ・実販売の税と領収書・販売者情報・ウイルス定義の更新と変換プロセスのOS隔離・外部監視・別媒体へのバックアップ保管を整備します。カーソルページング、codeとrequestId付きエラー、利用許諾本文のスナップショットはローカル実装済みです。専用テーブルへの正規化は本番拡張案です。

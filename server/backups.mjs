@@ -17,3 +17,17 @@ export function pruneAutomaticBackups(backupsDir,keep){
  const candidates=readdirSync(backupsDir).filter(name=>/^auto-backup-[\dTZ-]+-[a-f0-9]{8}$/.test(name)).filter(name=>{try{return JSON.parse(readFileSync(resolve(backupsDir,name,'manifest.json'))).automatic===true;}catch{return false;}}).sort().reverse();
  for(const name of candidates.slice(keep))rmSync(resolve(backupsDir,name),{recursive:true,force:true});
 }
+
+export function verifyBackup(target){
+ const manifest=JSON.parse(readFileSync(resolve(target,'manifest.json'),'utf8'));
+ if(manifest.version!==1||!Array.isArray(manifest.files)||typeof manifest.database!=='string')throw new Error('バックアップ形式が不正です。');
+ if(digest(readFileSync(resolve(target,'shop.sqlite')))!==manifest.database)throw new Error('データベースのチェックサムが一致しません。');
+ const names=new Set();for(const file of manifest.files){if(!/^[a-f0-9]{64}\.pptx$/.test(file.name)||names.has(file.name)||digest(readFileSync(resolve(target,'versions',file.name)))!==file.checksum||file.checksum!==file.name.slice(0,-5))throw new Error('ファイルのチェックサムが一致しません。');names.add(file.name);}
+ const db=new DatabaseSync(resolve(target,'shop.sqlite'),{readOnly:true});
+ try{
+  if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw new Error('SQLite整合性検査に失敗しました。');if(db.prepare('PRAGMA foreign_key_check').all().length)throw new Error('外部キーが不正です。');
+  for(const row of db.prepare("SELECT value FROM documents WHERE kind='products'").all()){const p=JSON.parse(row.value);if(p.version&&!names.has(p.version+'.pptx'))throw new Error('商品ファイルが欠落しています。');}
+  for(const row of db.prepare("SELECT value FROM documents WHERE kind='orderMeta'").all())for(const line of JSON.parse(row.value).lines||[])if(line.version&&!names.has(line.version+'.pptx'))throw new Error('購入済みファイルが欠落しています。');
+  return {manifest,orders:db.prepare('SELECT COUNT(*) AS n FROM orders').get().n,files:names.size};
+ }finally{db.close();}
+}

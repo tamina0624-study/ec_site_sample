@@ -47,7 +47,7 @@ async function localFixture(options={}){
  for(const name of readdirSync('private/downloads').filter(n=>n.endsWith('.pptx')))copyFileSync(resolve('private/downloads',name),resolve(fileDir,name));
  let clock=Date.now();const shop=createShop({dataDir,fileDir,backupsDir,backupInterval:0,now:()=>clock,...options});
  const server=createServer((req,res)=>shop.handle(req,res,()=>{res.statusCode=404;res.end();}));server.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
- async function client(){let cookie='',csrf='';async function send(path,method='GET',data,key){const response=await fetch(base+path,{method,headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},...(data?{body:JSON.stringify(data)}:{})});if(response.headers.get('set-cookie'))cookie=response.headers.get('set-cookie').split(';')[0];const result=await response.json();if(result.csrf)csrf=result.csrf;return {status:response.status,data:result,requestId:response.headers.get('x-request-id')};}await send('/api/session');return send;}
+ async function client(){let cookie='',csrf='';async function send(path,method='GET',data,key){const response=await fetch(base+path,{method,headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},...(data?{body:JSON.stringify(data)}:{})});if(response.headers.get('set-cookie'))cookie=response.headers.get('set-cookie').split(';')[0];const result=response.headers.get('content-type')?.includes('application/json')?await response.json():await response.text();if(result.csrf)csrf=result.csrf;return {status:response.status,data:result,requestId:response.headers.get('x-request-id')};}await send('/api/session');return send;}
  return {root,dataDir,fileDir,backupsDir,shop,client,now:()=>clock,advance:ms=>{clock+=ms;},password:role=>readFileSync(resolve(dataDir,role+'-password.txt'),'utf8').trim(),async close(){server.closeAllConnections();await new Promise(ok=>server.close(ok));await shop.close();rmSync(root,{recursive:true,force:true});}};
 }
 
@@ -109,5 +109,35 @@ test('自動バックアップ・保持数・手動保存の保持・失敗後�
   for(let i=0;i<3;i++){f.advance(1001);await f.shop.maintenance();}
   assert.equal(readdirSync(f.backupsDir).filter(n=>n.startsWith('auto-')).length,2);assert.equal(readdirSync(f.backupsDir).filter(n=>n.startsWith('backup-')).length,1);
   const original=resolve(f.fileDir,'versions',readdirSync(resolve(f.fileDir,'versions'))[0]);const {writeFileSync}=await import('node:fs');const originalBytes=readFileSync(original);writeFileSync(original,'corrupt');f.advance(1001);await f.shop.maintenance();assert.equal(f.shop.store.get('maintenance','backup').status,'failed');writeFileSync(original,originalBytes);f.advance(1001);await f.shop.maintenance();assert.equal(f.shop.store.get('maintenance','backup').status,'ok');
+ }finally{await f.close();}
+});
+
+
+test('模擬領収書の所有者限定・返金表示・購入時保存と復元演習',async()=>{
+ const f=await localFixture();try{
+  const owner=await f.client(),other=await f.client();const q=(await owner('/api/quotes','POST',{items:['proposal']})).data;const o=(await owner('/api/orders','POST',{quoteId:q.id,result:'success',accepted:true,termsVersion:q.terms},'receipt-order')).data;
+  assert.equal(o.receiptSnapshot.total,1200);assert.equal(o.receiptSnapshot.tax,109);assert.equal((await other(`/api/orders/${o.id}/receipt`)).status,404);
+  const receipt=await owner(`/api/orders/${o.id}/receipt`);assert.equal(receipt.status,200);assert.match(receipt.data,/実入金なし/);assert.equal((await owner(`/api/orders/${o.id}/receipt?download=1`)).status,200);
+  const env={...process.env,SHOP_DATA_DIR:f.dataDir,SHOP_FILE_DIR:f.fileDir,SHOP_BACKUP_DIR:f.backupsDir};execFileSync(process.execPath,['scripts/local-data.mjs','backup'],{env});const name=readdirSync(f.backupsDir)[0];
+  execFileSync(process.execPath,['scripts/local-data.mjs','backup-check',name],{env});execFileSync(process.execPath,['scripts/local-data.mjs','restore-drill',name],{env});assert.equal((await owner(`/api/orders/${o.id}`)).data.status,'paid');
+  await owner('/api/admin/login','POST',{password:f.password('admin')});await owner('/api/admin/reauth','POST',{password:f.password('admin')});await owner(`/api/admin/orders/${o.id}/refund`,'POST',{reason:'領収書検証'});assert.match((await owner(`/api/orders/${o.id}/receipt`)).data,/全額模擬返金済み/);
+  const {writeFileSync}=await import('node:fs');writeFileSync(resolve(f.backupsDir,name,'shop.sqlite'),'corrupted');assert.throws(()=>execFileSync(process.execPath,['scripts/local-data.mjs','restore-drill',name],{env,stdio:'pipe'}));assert.equal((await owner(`/api/orders/${o.id}`)).data.status,'refunded');
+ }finally{await f.close();}
+});
+
+test('検査必須モードでは未検査ファイルを販売せず、既存ファイルの検出結果も記録する',async()=>{
+ const assets={mode:'required',scanner:'/missing/clamscan',database:'',office:'/missing/libreoffice',raster:'/missing/pdftoppm'};const f=await localFixture({assets});try{
+  const {writeFileSync}=await import('node:fs');assets.scanner=resolve(f.root,'scanner.mjs');writeFileSync(assets.scanner,`#!${process.execPath}\nprocess.exit(1);`,{mode:0o700});
+  const send=await f.client();assert.equal((await send('/api/quotes','POST',{items:['proposal']})).data.code,'SCAN_REQUIRED');await send('/api/admin/login','POST',{password:f.password('admin')});
+  const p=(await send('/api/admin/products')).data.find(p=>p.id==='proposal');const result=await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision});assert.equal(result.status,400);assert.equal(result.data.code,'MALWARE_DETECTED');assert.equal(f.shop.store.get('versions',p.version).scan.status,'infected');assert.equal(f.shop.store.get('products',p.id).revision,p.revision);assert.equal((await send('/api/quotes','POST',{items:['proposal']})).data.code,'FILE_REJECTED');assert.equal((await send('/api/products/proposal/previews/0')).status,404);assets.mode='off';assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).data.code,'SCAN_REQUIRED');assert.equal(f.shop.store.get('versions',p.version).scan.status,'infected');
+ }finally{await f.close();}
+});
+
+test('ファイル処理中は競合を返し、完了後も古いrevisionの更新を拒否する',async()=>{
+ const assets={mode:'required',scanner:'/missing/clamscan',database:'',office:'/missing/libreoffice',raster:'/missing/pdftoppm'};const f=await localFixture({assets});try{
+  const {writeFileSync}=await import('node:fs');assets.scanner=resolve(f.root,'scanner.mjs');writeFileSync(assets.scanner,`#!${process.execPath}\nawait new Promise(r=>setTimeout(r,200));process.exit(0);`,{mode:0o700});
+  const send=await f.client();await send('/api/admin/login','POST',{password:f.password('admin')});const p=(await send('/api/admin/products')).data.find(p=>p.id==='proposal');
+  const first=send('/api/admin/products/proposal/prepare','POST',{revision:p.revision});let busy=false;for(let i=0;i<20;i++){busy=(await send('/api/admin/health')).data.assets.busy;if(busy)break;}assert.equal(busy,true);
+  assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).data.code,'ASSET_BUSY');assert.equal((await first).status,200);assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).status,409);
  }finally{await f.close();}
 });

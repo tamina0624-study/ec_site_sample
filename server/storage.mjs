@@ -23,6 +23,8 @@ export async function inspectPptx(bytes) {
  if(!presentation.includes('presentationml')) throw new Error('PowerPoint形式ではありません。');
  const pages=files.filter(f=>/^ppt\/slides\/slide\d+\.xml$/.test(f.name)).sort((a,b)=>Number(a.name.match(/\d+/)[0])-Number(b.name.match(/\d+/)[0]));
  if(!pages.length || pages.length>200) throw new Error('1〜200ページのPPTXを選んでください。');
+ // 変換エンジンへ外部参照やXML実体を渡さない。
+ for(const f of files.filter(f=>!f.dir&&/\.(xml|rels)$/i.test(f.name))){const xml=await f.async('string');if(/<!DOCTYPE|<!ENTITY/i.test(xml)||[...xml.matchAll(/TargetMode\s*=\s*["']([^"']*)["']/gi)].some(m=>m[1]!=='Internal'))throw new Error('外部参照・XML実体を含むPPTXは登録できません。');}
  const texts=[];
  for(const f of pages.slice(0,12)) {
   const xml=await f.async('string');

@@ -16,6 +16,7 @@ test('お気に入り・並び替え・問い合わせ・管理画面・ロー�
  await page.getByLabel('商品ID',{exact:true}).fill('ui-'+crypto.randomUUID().slice(0,8));await page.getByLabel('商品名',{exact:true}).fill('UI検証用下書き');await page.getByLabel('説明',{exact:true}).fill('非公開の商品を登録するテスト');await page.getByLabel('税込デモ価格（円）').fill('900');await page.getByRole('button',{name:'商品を保存',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'商品を保存'})).toBeVisible();
  await page.locator('input[type=file]').setInputFiles('private/downloads/proposal.pptx');await expect(page.getByRole('status').filter({hasText:'PPTXを検証して登録'})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.getByRole('button',{name:'画像プレビュー生成・ウイルス検査',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'ファイル処理が完了'})).toBeVisible();
  await page.getByRole('button',{name:'運用・分析',exact:true}).click();await expect(page.getByRole('heading',{name:'運用状況'})).toBeVisible();
  await page.getByRole('button',{name:'ログアウト'}).click();await expect(page.getByRole('button',{name:'管理者ログイン'})).toBeVisible();
  await page.locator('select[name=role]').selectOption('editor');await page.getByLabel('管理用パスワード').fill('local-test-editor-only');await page.getByRole('button',{name:'管理者ログイン'}).click();

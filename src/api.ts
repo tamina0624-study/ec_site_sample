@@ -1,6 +1,6 @@
-export type Product={id:string;name:string;category:string;price:number;subtitle:string;description:string;color:string;sections:string[];status:string;revision:number;version:string|null;fileSize:number;pageCount:number;previewCount:number;compatible:string;bundle:string[];created:string};
+export type Product={id:string;name:string;category:string;price:number;subtitle:string;description:string;color:string;sections:string[];status:string;revision:number;version:string|null;fileSize:number;pageCount:number;previewCount:number;previewMode?:string;scanStatus?:string;compatible:string;bundle:string[];created:string};
 export type Line={product_id:string;name:string;price:number;version:string};
-export type Order={id:string;date:string;items:string[];lines:Line[];total:number;status:string;discount:number;licenseSnapshot?:{version:string;terms:{title:string;body:string[]};refund:{title:string;body:string[]}}};
+export type Order={id:string;date:string;items:string[];lines:Line[];total:number;status:string;discount:number;receiptSnapshot?:{number:string;total:number;tax:number;net:number;taxRate:number};licenseSnapshot?:{version:string;terms:{title:string;body:string[]};refund:{title:string;body:string[]}}};
 export type Quote={id:string;items:string[];total:number;subtotal:number;discount:number;expires:number;terms:string;lines:Line[]};
 export type Page<T>={items:T[];nextCursor:string|null};
 export type Purchases=Record<string,{orderId:string;name:string}>;

@@ -1,24 +1,26 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { openStore, TERMS_VERSION, MAX_FILE_SIZE, matchesPassword, inspectPptx, hash } from './storage.mjs';
+import { openStore, TERMS_VERSION, MAX_FILE_SIZE, matchesPassword, hash } from './storage.mjs';
 
 import {generateTotpSecret,verifyTotp,newRecoveryCodes} from './security.mjs';
 import {legalSnapshot,legalTexts} from './legal.mjs';
 import {saveBackup,pruneAutomaticBackups} from './backups.mjs';
 import {pageParameters,encodeCursor} from './pagination.mjs';
+import {assetConfig,prepareAsset,toolStatus,AssetError} from './assets.mjs';
+import {receiptSnapshot,receiptHtml} from './receipts.mjs';
 
 class HttpError extends Error {constructor(status,message,code,details){super(message);this.status=status;this.code=code;this.details=details;}}
 const fail=(status,message,code,details)=>{throw new HttpError(status,message,code,details);};
 const text=(value,max=200)=>typeof value==='string'&&value.trim().length>0&&value.length<=max;
 const safeId=id=>typeof id==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(id);
 const escapeXml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
-export function createShop({dataDir=resolve(process.env.SHOP_DATA_DIR || 'data'),fileDir=resolve(process.env.SHOP_FILE_DIR||'private/downloads'),now=()=>Date.now(),tokenTtl=300000,quoteTtl=600000,backupsDir=resolve(process.env.SHOP_BACKUP_DIR||'backups'),backupInterval=Number(process.env.SHOP_BACKUP_INTERVAL_MS||86400000),backupKeep=Number(process.env.SHOP_BACKUP_KEEP||7)}={}) {
+export function createShop({dataDir=resolve(process.env.SHOP_DATA_DIR || 'data'),fileDir=resolve(process.env.SHOP_FILE_DIR||'private/downloads'),now=()=>Date.now(),tokenTtl=300000,quoteTtl=600000,backupsDir=resolve(process.env.SHOP_BACKUP_DIR||'backups'),backupInterval=Number(process.env.SHOP_BACKUP_INTERVAL_MS||86400000),backupKeep=Number(process.env.SHOP_BACKUP_KEEP||7),assets=assetConfig()}={}) {
  if(!Number.isSafeInteger(backupInterval)||backupInterval<0||!Number.isInteger(backupKeep)||backupKeep<1||backupKeep>365)throw new Error('バックアップ設定が不正です。');
  const pidFile=resolve(dataDir,'server.pid');
  if(existsSync(pidFile)){let alive=false;try{process.kill(Number(readFileSync(pidFile,'utf8')),0);alive=true;}catch{}if(alive)throw new Error('このデータベースを使うローカルサーバーは既に起動しています。');}
  const store=openStore(dataDir,fileDir);writeFileSync(pidFile,String(process.pid),{mode:0o600});const {db,get,list,put,tx,snapshot}=store;
- const limits=new Map();
+ const limits=new Map();let tools=null;let assetBusy=false;
  const json=(res,status,body)=>{res.setHeader('X-Request-Id',res.shopRequestId||randomUUID());if(status>=400)body={...body,code:body.code||({400:'INVALID_INPUT',401:'UNAUTHORIZED',402:'DEMO_PAYMENT_FAILED',403:'FORBIDDEN',404:'NOT_FOUND',405:'METHOD_NOT_ALLOWED',409:'CONFLICT',413:'PAYLOAD_TOO_LARGE',429:'RATE_LIMITED'}[status]||'INTERNAL_ERROR'),requestId:res.shopRequestId};res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(body));};
  const audit=(actor,action,target,reason='')=>{const id=randomUUID();put('audit',id,{id,actor,action,target,reason,date:new Date(now()).toISOString()});};
  const notification=(id,subject,body)=>{if(!get('notifications',id))put('notifications',id,{id,subject,body,status:'pending',attempts:0,date:new Date(now()).toISOString(),nextRun:now()});};
@@ -35,20 +37,20 @@ export function createShop({dataDir=resolve(process.env.SHOP_DATA_DIR || 'data')
  const timer=setInterval(()=>{try{deliver();void maintenance().catch(()=>{});}catch{ /* DBが復旧した次回に再試行 */ }},5000);timer.unref();
  const hydrate=row=>{const meta=get('orderMeta',row.id)||{status:'paid',lines:[]};return {id:row.id,date:row.date,total:row.total,...meta,items:meta.lines.map(i=>i.product_id)};};
  const owned=(session,id)=>{const row=db.prepare('SELECT * FROM orders WHERE id=? AND session_id=?').get(id,session);if(!row)fail(404,'注文が見つかりません。');return hydrate(row);};
- const expose=p=>{const v=get('versions',p.version||(p.bundle.length?get('products',p.bundle[0])?.version:null));return {...p,fileSize:v?.size||0,pageCount:v?.pages||0,previewCount:Math.min(v?.texts?.length||1,12)};};
+ const expose=p=>{const v=get('versions',p.version||(p.bundle.length?get('products',p.bundle[0])?.version:null));return {...p,fileSize:v?.size||0,pageCount:v?.pages||0,previewCount:Math.min(v?.preview?.status==='ready'&&existsSync(resolve(dataDir,'previews',v.id,'0.png'))?v.preview.pages:v?.texts?.length||1,12),previewMode:v?.preview?.status==='ready'&&existsSync(resolve(dataDir,'previews',v.id,'0.png'))?'image':'text',scanStatus:v?.scan?.status||'unscanned'};};
  const rate=(key,max)=>{if(limits.size>10000)for(const [k,v]of limits)if(v.until<now())limits.delete(k);const current=limits.get(key);const value=current&&current.until>now()?current:{count:0,until:now()+60000};value.count++;limits.set(key,value);if(value.count>max)fail(429,'操作が多すぎます。1分後に再度お試しください。');};
  const body=async req=>{let length=0;const chunks=[];for await(const chunk of req){length+=chunk.length;if(length>(/\/products\/[^/]+\/file$/.test(req.url)?MAX_FILE_SIZE*1.4+8192:16384))fail(413,'データが大きすぎます。');chunks.push(chunk);}try{const parsed=JSON.parse(Buffer.concat(chunks).toString());if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))fail(400,'入力が不正です。');return parsed;}catch{fail(400,'入力が不正です。');}};
  function selection(ids){if(!Array.isArray(ids)||!ids.length||ids.length>30||ids.some(id=>!safeId(id)))fail(400,'商品を選んでください。');
   const selected=[...new Set(ids)].sort().map(id=>get('products',id));
   if(selected.some(p=>!p||p.status!=='published'))fail(409,'商品が販売停止または変更されています。');
-  const files=new Map();for(const p of selected){for(const id of p.bundle.length?p.bundle:[p.id]){const f=get('products',id);if(!f?.version||f.status!=='published')fail(409,'構成商品が非公開またはファイル未登録です。');if(files.has(id))fail(409,'セットと単品で同じ商品が重複しています。カートを確認してください。');files.set(id,{product_id:id,name:f.name,price:f.price,version:f.version});}}
+  const files=new Map();for(const p of selected){for(const id of p.bundle.length?p.bundle:[p.id]){const f=get('products',id);if(!f?.version||f.status!=='published')fail(409,'構成商品が非公開またはファイル未登録です。');if(get('versions',f.version)?.scan?.status==='infected')fail(409,'検査で問題を検出したファイルは購入できません。','FILE_REJECTED');if(assets.mode==='required'&&get('versions',f.version)?.scan?.status!=='clean')fail(409,'ウイルス検査完了前の商品は購入できません。','SCAN_REQUIRED');if(files.has(id))fail(409,'セットと単品で同じ商品が重複しています。カートを確認してください。');files.set(id,{product_id:id,name:f.name,price:f.price,version:f.version});}}
   return {selected,lines:[...files.values()],subtotal:selected.reduce((sum,p)=>sum+p.price,0)};
  }
  function price(ids,code){const chosen=selection(ids);let discount=0;
   if(code){const coupon=get('coupons',code);if(!coupon||!coupon.active||coupon.expires<=now()||coupon.used>=coupon.limit)fail(409,'クーポンが無効または利用上限に達しています。');discount=Math.min(chosen.subtotal,Math.floor(chosen.subtotal*coupon.percent/100));}
   return {...chosen,discount,total:chosen.subtotal-discount};
  }
- function checkDownload(session,id,pid){const order=owned(session,id);const line=order.lines.find(i=>i.product_id===pid);if(order.status!=='paid'||!line)fail(404,'ダウンロード権限がありません。');return line;}
+ function checkDownload(session,id,pid){const order=owned(session,id);const line=order.lines.find(i=>i.product_id===pid);if(order.status!=='paid'||!line||get('versions',line.version)?.scan?.status==='infected')fail(404,'ダウンロード権限がありません。');return line;}
  function authenticate(role,data){
   const c=get('credentials',role);if(!c||!matchesPassword(data.password,c))fail(401,'管理用パスワードが一致しません。','BAD_CREDENTIALS');
   if(c.totpSecret){
@@ -123,7 +125,7 @@ export function createShop({dataDir=resolve(process.env.SHOP_DATA_DIR || 'data')
    if(method==='GET'&&path==='/api/purchases')return json(res,200,purchased(session));
    if(method==='GET'&&path==='/api/products')return json(res,200,list('products').filter(p=>p.status==='published').map(expose));
    const preview=path.match(/^\/api\/products\/([a-zA-Z0-9-]+)\/previews\/(\d+)$/);
-   if(method==='GET'&&preview){const p=get('products',preview[1]);if(!p||p.status!=='published')fail(404,'商品が見つかりません。');const v=get('versions',p.version||(p.bundle.length?get('products',p.bundle[0])?.version:null));const index=Number(preview[2]);if(!v||index>=v.texts.length)fail(404,'プレビューがありません。');
+   if(method==='GET'&&preview){const p=get('products',preview[1]);if(!p||p.status!=='published')fail(404,'商品が見つかりません。');const v=get('versions',p.version||(p.bundle.length?get('products',p.bundle[0])?.version:null));const index=Number(preview[2]);if(!v||v.scan?.status==='infected')fail(404,'プレビューがありません。');const image=resolve(dataDir,'previews',v.id,`${index}.png`);if(v.preview?.status==='ready'&&index<v.preview.pages&&existsSync(image)){res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(readFileSync(image));}if(index>=v.texts.length)fail(404,'プレビューがありません。');
     const lines=(v.texts[index]||p.name).match(/.{1,22}/gu)?.slice(0,5)||[p.name];const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#${p.color}"/><text x="65" y="80" fill="white" font-family="sans-serif" font-size="22">SLIDE MARKET / TEXT PREVIEW</text>${lines.map((line,i)=>`<text x="65" y="${230+i*70}" fill="white" font-family="sans-serif" font-size="40">${escapeXml(line)}</text>`).join('')}<text x="65" y="670" fill="white" font-size="20">${index+1} / ${v.pages} · 内容のテキストプレビュー</text></svg>`;
     res.writeHead(200,{'Content-Type':'image/svg+xml','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'",'X-Content-Type-Options':'nosniff'});return res.end(svg);
    }
@@ -135,6 +137,8 @@ export function createShop({dataDir=resolve(process.env.SHOP_DATA_DIR || 'data')
     const d=await body(req);const code=typeof d.coupon==='string'?d.coupon.trim().toUpperCase():'';const p=price(d.items,code);rejectPurchased(session,p.lines);const quote={id:randomUUID(),session,items:[...new Set(d.items)].sort(),coupon:code,total:p.total,subtotal:p.subtotal,discount:p.discount,lines:p.lines,revisions:p.selected.map(i=>({id:i.id,revision:i.revision})),expires:now()+quoteTtl,terms:TERMS_VERSION};put('quotes',quote.id,quote);return json(res,200,{...quote,session:undefined});
    }
    if(method==='GET'&&path==='/api/orders')return json(res,200,orderPage(url,session));
+   const receipt=path.match(/^\/api\/orders\/([^/]+)\/receipt$/);
+   if(method==='GET'&&receipt){const o=owned(session,receipt[1]);if(!o.receiptSnapshot)fail(409,'この旧注文には購入時の領収書データがありません。','RECEIPT_UNAVAILABLE');const html=receiptHtml(o);res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",'X-Content-Type-Options':'nosniff',...(url.searchParams.get('download')==='1'?{'Content-Disposition':`attachment; filename="demo-receipt.html"`}:{})});return res.end(html);}
    const detail=path.match(/^\/api\/orders\/([^/]+)$/);if(method==='GET'&&detail)return json(res,200,owned(session,detail[1]));
    if(method==='DELETE'&&path==='/api/orders'){tx(()=>{for(const row of db.prepare('SELECT id FROM orders WHERE session_id=?').all(session)){const meta=get('orderMeta',row.id);if(meta){meta.status='reset';put('orderMeta',row.id,meta);}}db.prepare('DELETE FROM download_tokens WHERE session_id=?').run(session);db.prepare('DELETE FROM orders WHERE session_id=?').run(session);});return json(res,200,{ok:true});}
    if(method==='POST'&&path==='/api/orders'){
@@ -149,7 +153,7 @@ export function createShop({dataDir=resolve(process.env.SHOP_DATA_DIR || 'data')
     tx(()=>{
      db.prepare('INSERT INTO orders VALUES (?,?,?,?,?,?)').run(id,session,date,q.total,key,canonical);
      for(const line of q.lines)db.prepare('INSERT INTO items VALUES (?,?,?,?)').run(id,line.product_id,line.name,line.price);
-     put('orderMeta',id,{status:'paid',terms:TERMS_VERSION,licenseSnapshot:legalSnapshot(),acceptedAt:date,discount:q.discount,lines:q.lines,purchasedProducts:q.items});q.orderId=id;put('quotes',q.id,q);
+     put('orderMeta',id,{status:'paid',terms:TERMS_VERSION,licenseSnapshot:legalSnapshot(),receiptSnapshot:receiptSnapshot(q,p.selected,date,id),acceptedAt:date,discount:q.discount,lines:q.lines,purchasedProducts:q.items});q.orderId=id;put('quotes',q.id,q);
      if(q.coupon){const c=get('coupons',q.coupon);if(c.used>=c.limit)fail(409,'クーポンの利用上限に達しました。');c.used++;put('coupons',c.code,c);}
      notification(`purchase-${id}`,'デモ購入完了',`注文番号：${id}\n合計：¥${q.total}\n${q.lines.map(i=>i.name).join('\n')}\n注文履歴：/#history\n実際の請求・メール送信はありません。`);
      const day=date.slice(0,10);db.prepare('INSERT INTO metrics VALUES (?,?,1) ON CONFLICT(day,event) DO UPDATE SET count=count+1').run(day,'purchase');
@@ -167,11 +171,15 @@ export function createShop({dataDir=resolve(process.env.SHOP_DATA_DIR || 'data')
     if(method==='POST'&&existing)fail(409,'商品IDが既に存在します。');if(method==='PATCH'&&(!existing||existing.revision!==d.revision))fail(409,'他の操作で更新されています。読み直してください。');
     const bundle=Array.isArray(d.bundle)?[...new Set(d.bundle)]:[];if(bundle.length>20||bundle.some(pid=>pid===id||!get('products',pid)?.version||get('products',pid)?.bundle.length))fail(400,'セットは単品商品のみ指定できます。');
     const value={...existing,id,name:d.name,description:d.description,category:d.category,price:d.price,status:d.status,bundle,revision:(existing?.revision||0)+1,version:existing?.version||null,subtitle:typeof d.subtitle==='string'?d.subtitle.slice(0,200):d.name,color:/^[a-fA-F0-9]{6}$/.test(d.color)?d.color:'263F70',sections:existing?.sections||[],compatible:typeof d.compatible==='string'?d.compatible.slice(0,200):'PowerPointなどのPPTX対応ソフト',created:existing?.created||new Date(now()).toISOString()};
+    if(value.status==='published'&&(bundle.length?bundle.some(pid=>get('versions',get('products',pid)?.version)?.scan?.status==='infected'):get('versions',value.version)?.scan?.status==='infected'))fail(409,'検査で問題を検出したファイルは公開できません。','FILE_REJECTED');
+    if(value.status==='published'&&assets.mode==='required'&&(bundle.length?bundle.some(pid=>get('versions',get('products',pid)?.version)?.scan?.status!=='clean'):get('versions',value.version)?.scan?.status!=='clean'))fail(409,'公開前にウイルス検査を完了してください。','SCAN_REQUIRED');
     if(value.status==='published'&&!value.version&&!bundle.length)fail(409,'公開前にPPTXを登録してください。');tx(()=>{put('products',id,value);audit(session,'product-save',id);});return json(res,200,expose(value));
    }
-   const upload=path.match(/^\/api\/admin\/products\/([a-zA-Z0-9-]+)\/file$/);
-   if(method==='POST'&&upload){rate(`upload:${session}`,10);const p=get('products',upload[1]);if(!p)fail(404,'商品がありません。');const d=await body(req);if(d.revision!==p.revision)fail(409,'商品が変更されています。');if(typeof d.base64!=='string'||!d.base64.length||!/^[A-Za-z0-9+/]*={0,2}$/.test(d.base64))fail(400,'ファイルが不正です。');const bytes=Buffer.from(d.base64,'base64');let meta;try{meta=await inspectPptx(bytes);}catch(e){fail(400,e.message);}
-    const checksum=snapshot(bytes);tx(()=>{if(get('products',p.id).revision!==p.revision)fail(409,'商品が変更されています。読み直してください。');put('versions',checksum,{id:checksum,size:bytes.length,...meta,created:new Date(now()).toISOString()});p.version=checksum;p.bundle=[];p.revision++;put('products',p.id,p);audit(session,'file-upload',p.id);});return json(res,200,expose(p));
+   const upload=path.match(/^\/api\/admin\/products\/([a-zA-Z0-9-]+)\/(file|prepare)$/);
+   if(method==='POST'&&upload){rate(`upload:${session}`,10);const p=get('products',upload[1]);if(!p)fail(404,'商品がありません。');const d=await body(req);if(d.revision!==p.revision)fail(409,'商品が変更されています。');if(assetBusy)fail(409,'他のファイルを処理しています。完了後に再試行してください。','ASSET_BUSY');
+    let bytes;if(upload[2]==='file'){if(typeof d.base64!=='string'||!d.base64.length||!/^[A-Za-z0-9+/]*={0,2}$/.test(d.base64))fail(400,'ファイルが不正です。');bytes=Buffer.from(d.base64,'base64');}else{if(!p.version||p.bundle.length)fail(400,'単品商品とPPTXを選んでください。');bytes=readFileSync(resolve(fileDir,'versions',`${p.version}.pptx`));if(hash(bytes)!==p.version)fail(409,'ファイルの整合性を確認できません。');}
+    assetBusy=true;let meta;try{meta=await prepareAsset(bytes,{dataDir,config:assets});}catch(e){if(e instanceof AssetError){const checksum=hash(bytes),old=get('versions',checksum);if(old){old.scan={status:e.code==='MALWARE_DETECTED'?'infected':'failed',engine:'ClamAV',checkedAt:new Date(now()).toISOString()};put('versions',checksum,old);}fail(e.status,e.message,e.code);}fail(400,e.message,'INVALID_PPTX');}finally{assetBusy=false;}
+    const checksum=hash(bytes);if(get('versions',checksum)?.scan?.status==='infected'&&meta.scan.status!=='clean')fail(409,'検出済みファイルは再検査を完了するまで登録できません。','SCAN_REQUIRED');snapshot(bytes);tx(()=>{if(get('products',p.id).revision!==p.revision)fail(409,'商品が変更されています。読み直してください。');put('versions',checksum,{...get('versions',checksum),id:checksum,size:bytes.length,...meta,created:get('versions',checksum)?.created||new Date(now()).toISOString()});p.version=checksum;p.bundle=[];p.revision++;put('products',p.id,p);audit(session,upload[2]==='file'?'file-upload':'asset-prepare',p.id);});return json(res,200,expose(p));
    }
    if(method==='GET'&&path==='/api/admin/orders')return json(res,200,orderPage(url));
    const refund=path.match(/^\/api\/admin\/orders\/([^/]+)\/refund$/);
@@ -186,7 +194,7 @@ export function createShop({dataDir=resolve(process.env.SHOP_DATA_DIR || 'data')
    const retry=path.match(/^\/api\/admin\/notifications\/([^/]+)\/retry$/);
    if(method==='POST'&&retry){const n=get('notifications',retry[1]);if(!n)fail(404,'通知がありません。');n.status='pending';n.nextRun=now();n.attempts=0;put('notifications',n.id,n);audit(session,'notification-retry',n.id);return json(res,200,{ok:true});}
    if(method==='GET'&&path==='/api/admin/audit'){let p;try{p=pageParameters(url);}catch(e){fail(400,e.message,'INVALID_CURSOR');}const rows=db.prepare(`SELECT value FROM documents WHERE kind='audit' ${p.cursor?"AND (json_extract(value,'$.date') < ? OR (json_extract(value,'$.date') = ? AND id < ?))":''} ORDER BY json_extract(value,'$.date') DESC,id DESC LIMIT ?`).all(...(p.cursor?[p.cursor.date,p.cursor.date,p.cursor.id]:[]),p.limit+1).map(r=>JSON.parse(r.value));const items=rows.slice(0,p.limit);return json(res,200,{items,nextCursor:rows.length>p.limit?encodeCursor(items.at(-1)):null});}
-   if(method==='GET'&&path==='/api/admin/health'){return json(res,200,{database:'ok',orders:db.prepare('SELECT COUNT(*) AS n FROM orders').get().n,pendingNotifications:list('notifications').filter(n=>n.status==='pending').length,failedNotifications:list('notifications').filter(n=>n.status==='failed').length,metrics:db.prepare('SELECT * FROM metrics ORDER BY day DESC,event').all(),backup:{intervalMs:backupInterval,keep:backupKeep,...get('maintenance','backup')},mode:'local-simulation'});}
+   if(method==='GET'&&path==='/api/admin/health'){tools??=await toolStatus(assets);return json(res,200,{database:'ok',assets:{...tools,busy:assetBusy},orders:db.prepare('SELECT COUNT(*) AS n FROM orders').get().n,pendingNotifications:list('notifications').filter(n=>n.status==='pending').length,failedNotifications:list('notifications').filter(n=>n.status==='failed').length,metrics:db.prepare('SELECT * FROM metrics ORDER BY day DESC,event').all(),backup:{intervalMs:backupInterval,keep:backupKeep,...get('maintenance','backup')},mode:'local-simulation'});}
    fail(404,'見つかりません。');
   }catch(e){if(!(e instanceof HttpError)){console.error('Local shop error:',e.name);try{put('errors',randomUUID(),{date:new Date(now()).toISOString(),requestId:res.shopRequestId,type:e.name,path:url.pathname.replace(/\/api\/downloads\/.*/,'/api/downloads/[redacted]')});}catch{}}return json(res,e.status||500,{message:e.status?e.message:'サーバーで処理できませんでした。再度お試しください。',code:e.code,details:e.details});}
  }};

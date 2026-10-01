@@ -1,23 +1,18 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, renameSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, renameSync, rmSync, mkdtempSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
-import { createHash } from 'node:crypto';
-import {saveBackup as writeBackup} from '../server/backups.mjs';
+import {tmpdir} from 'node:os';
+import {saveBackup as writeBackup,verifyBackup} from '../server/backups.mjs';
 const dataDir=resolve(process.env.SHOP_DATA_DIR||'data');
 const filesDir=resolve(process.env.SHOP_FILE_DIR||'private/downloads');
 const backupsDir=resolve(process.env.SHOP_BACKUP_DIR||'backups');
-const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const command=process.argv[2];
 async function saveBackup(){const result=await writeBackup({dataDir,fileDir:filesDir,backupsDir});console.log(`バックアップ：${result.path}`);return result.path;}
 async function restoreBackup(){
  const supplied=process.argv[3];if(!supplied)throw new Error('npm run restore -- バックアップ名 を指定してください。');
  const target=resolve(backupsDir,basename(supplied));
  const pidFile=resolve(dataDir,'server.pid');if(existsSync(pidFile)){const pid=Number(readFileSync(pidFile,'utf8'));let alive=false;try{process.kill(pid,0);alive=true;}catch{}if(alive)throw new Error('先に開発・プレビューサーバーを停止してください。');}
- const m=JSON.parse(readFileSync(resolve(target,'manifest.json'),'utf8'));if(m.version!==1||!Array.isArray(m.files))throw new Error('バックアップ形式が不正です。');
- const dbBytes=readFileSync(resolve(target,'shop.sqlite'));if(digest(dbBytes)!==m.database)throw new Error('データベースのチェックサムが一致しません。');
- for(const file of m.files){if(!/^[a-f0-9]{64}\.pptx$/.test(file.name)||digest(readFileSync(resolve(target,'versions',file.name)))!==file.checksum||file.checksum!==file.name.slice(0,-5))throw new Error('ファイルのチェックサムが一致しません。');}
- const verify=new DatabaseSync(resolve(target,'shop.sqlite'),{readOnly:true});
- try{if(verify.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw new Error('SQLite整合性検査に失敗しました。');if(verify.prepare('PRAGMA foreign_key_check').all().length)throw new Error('外部キーが不正です。');const names=new Set(m.files.map(f=>f.name));for(const row of verify.prepare("SELECT value FROM documents WHERE kind='products'").all()){const p=JSON.parse(row.value);if(p.version&&!names.has(p.version+'.pptx'))throw new Error('商品ファイルが欠落しています。');}for(const row of verify.prepare("SELECT value FROM documents WHERE kind='orderMeta'").all())for(const line of JSON.parse(row.value).lines||[])if(line.version&&!names.has(line.version+'.pptx'))throw new Error('購入済みファイルが欠落しています。');}finally{verify.close();}
+ const {manifest:m}=verifyBackup(target);const dbBytes=readFileSync(resolve(target,'shop.sqlite'));
  if(existsSync(resolve(dataDir,'shop.sqlite')))await saveBackup();
  mkdirSync(dataDir,{recursive:true,mode:0o700});mkdirSync(resolve(filesDir,'versions'),{recursive:true});
  for(const file of m.files)copyFileSync(resolve(target,'versions',file.name),resolve(filesDir,'versions',file.name));
@@ -28,6 +23,15 @@ async function restoreBackup(){
 }
 try{
  if(command==='backup')await saveBackup();
+ else if(command==='backup-list'){
+  if(!existsSync(backupsDir))console.log('バックアップはありません。');else for(const name of readdirSync(backupsDir).filter(n=>/^(?:auto-)?backup-[a-zA-Z0-9-]+$/.test(n)).sort().reverse()){try{const m=JSON.parse(readFileSync(resolve(backupsDir,name,'manifest.json')));console.log(`${name} ${m.date} ${m.automatic?'自動':'手動'}（未検証）`);}catch{console.log(`${name} 読み取り不可`);}}
+ }else if(['backup-check','restore-drill'].includes(command)){
+  const supplied=process.argv[3];if(!supplied)throw new Error('バックアップ名を指定してください。');const target=resolve(backupsDir,basename(supplied));const verified=verifyBackup(target);
+  if(command==='restore-drill'){
+   const work=mkdtempSync(resolve(tmpdir(),'slide-market-restore-drill-'));try{mkdirSync(resolve(work,'versions'));copyFileSync(resolve(target,'shop.sqlite'),resolve(work,'shop.sqlite'));copyFileSync(resolve(target,'manifest.json'),resolve(work,'manifest.json'));for(const f of verified.manifest.files)copyFileSync(resolve(target,'versions',f.name),resolve(work,'versions',f.name));verifyBackup(work);}finally{rmSync(work,{recursive:true,force:true});}
+   console.log(`一時領域への復元と整合性検査が成功しました。注文${verified.orders}件・ファイル${verified.files}件。稼働中のデータは変更していません。`);
+  }else console.log(`検証成功：注文${verified.orders}件・ファイル${verified.files}件。`);
+ }
  else if(command==='restore')await restoreBackup();
  else if(command==='admin-reset'){
   const {randomBytes}=await import('node:crypto');const {passwordHash}=await import('../server/storage.mjs');
@@ -36,5 +40,5 @@ try{
  }else if(command==='admin-code'){
   const {totp}=await import('../server/security.mjs');const role=process.argv[3]==='editor'?'editor':'admin';
   const db=new DatabaseSync(resolve(dataDir,'shop.sqlite'),{readOnly:true});try{const row=db.prepare("SELECT value FROM documents WHERE kind='credentials' AND id=?").get(role);const c=row?JSON.parse(row.value):null;const pending=db.prepare("SELECT value FROM documents WHERE kind='mfaPending' AND json_extract(value,'$.role')=? AND json_extract(value,'$.expires')>? ORDER BY json_extract(value,'$.expires') DESC LIMIT 1").get(role,Date.now());const secret=c?.totpSecret||(pending?JSON.parse(pending.value).secret:null);if(!secret)throw new Error('先に管理画面でMFA設定を開始してください。');console.log(totp(secret,Math.floor(Date.now()/30000)));console.log('ローカル確認用のコードです。一度使用したコードは次の更新まで再使用できません。');}finally{db.close();}
- }else throw new Error('backup / restore / admin-reset / admin-code を指定してください。');
+ }else throw new Error('backup / backup-list / backup-check / restore-drill / restore / admin-reset / admin-code を指定してください。');
 }catch(e){console.error(e.message);process.exitCode=1;}
