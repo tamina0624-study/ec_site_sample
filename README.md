@@ -129,3 +129,5 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/slide-market-browsers npm test
 決済はブラウザ内のシミュレーションです。個人情報・カード情報は入力しません。注文・カートはローカルストレージに保存され、購入証明には使えません。PPTXファイルは公開パスにあるため、購入操作なしでも取得できます。本番販売にはサーバーでの価格計算、決済連携、Webhook検証、注文管理、非公開ファイルのアクセス制御が必要です。
 
 設計資料：`docs/ec-site-patterns.md`、`docs/demo-requirements.md`。
+
+実運用に向けた基本設計書：[production-basic-design.html](docs/production-basic-design.html)。HTMLファイルをブラウザで開くと、構成図、機能・画面・データ・API設計、運用・テスト方針を確認できます。印刷・PDF保存にも対応しています。

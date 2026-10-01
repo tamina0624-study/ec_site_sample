@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slide Market｜実運用に向けた基本設計書</title>
+<style>
+:root{color-scheme:light;--ink:#192c43;--blue:#245ec7;--line:#dce4ee;--muted:#526477}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#f3f6fa;color:var(--ink);font:16px/1.8 system-ui,-apple-system,"Segoe UI",sans-serif}header{background:#192c43;color:white;padding:52px max(24px,calc((100vw - 1100px)/2))}header p{color:#d6e2f6}h1{font-size:clamp(26px,4vw,42px);line-height:1.4;margin:12px 0}h2{font-size:25px;border-bottom:2px solid var(--line);padding-bottom:12px}h3{font-size:19px}a{color:var(--blue)}a:focus-visible,summary:focus-visible{outline:3px solid #dc8a18;outline-offset:4px}.layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:32px;max-width:1150px;margin:auto;padding:32px 24px}nav{position:sticky;top:24px;align-self:start}nav a{display:block;padding:5px 0;text-decoration:none}main{min-width:0}section{background:white;border:1px solid var(--line);border-radius:14px;padding:28px;margin-bottom:24px;scroll-margin-top:24px}section h2:first-child{margin-top:0}.tag{display:inline-block;background:#e8f0ff;color:#224b87;border-radius:30px;padding:3px 12px;font-size:13px}.note{border-left:4px solid var(--blue);background:#eff5ff;padding:16px}.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border-bottom:1px solid var(--line);padding:12px;text-align:left;vertical-align:top}th{background:#eff3f8}code{background:#edf1f6;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}li{margin:5px 0}.diagram{width:100%;height:auto;display:block}.diagram text{font-family:system-ui,sans-serif;fill:#192c43;font-size:15px}.diagram .box{fill:#f0f5ff;stroke:#b7ccec;stroke-width:2}.diagram .edge{stroke:#526477;stroke-width:2;fill:none}details{border:1px solid var(--line);border-radius:8px;padding:12px;margin:12px 0}summary{cursor:pointer;font-weight:600}footer{text-align:center;padding:24px;color:var(--muted)}@media(max-width:850px){.layout{grid-template-columns:1fr;padding:16px;gap:16px}nav{position:static;background:white;padding:16px;border-radius:12px}nav a{display:inline-block;margin-right:16px}section{padding:20px}}@media print{body{background:white;font-size:11pt}header{background:white;color:#192c43;padding:0}header p{color:#526477}.layout{display:block;padding:0}nav{display:none}section{border:none;padding:0;margin:24px 0;break-inside:auto}h2,h3{break-after:avoid}tr,.diagram{break-inside:avoid}a{color:inherit}details{border:none}footer{display:none}}
+</style>
+</head>
+<body>
+<header><span class="tag">基本設計書 v1.0・設計案</span><h1>Slide Market<br>実運用に向けた基本設計</h1><p>PowerPoint資料のダウンロード販売を、安全に運営するための機能・データ・処理設計。</p><p>作成日：2026年10月1日 ／ 対象：ec_site_sample ／ 現行：React・TypeScript・Viteの学習用デモ</p></header>
+<div class="layout">
+<nav aria-label="目次"><strong>目次</strong><a href="#scope">01 目的と範囲</a><a href="#architecture">02 システム構成</a><a href="#features">03 機能一覧</a><a href="#screens">04 画面設計</a><a href="#flows">05 業務フローと状態</a><a href="#data">06 データ設計</a><a href="#api">07 API設計</a><a href="#security">08 認証と権限</a><a href="#operations">09 運用・非機能要件</a><a href="#tests">10 テストと移行</a><a href="#decisions">11 決定が必要な事項</a></nav>
+<main>
+<section id="scope"><h2>01 目的と範囲</h2><p>現在の模擬購入を、実際の入金確認と購入権限に基づくダウンロード販売へ拡張する。対象は単一店舗・日本国内向け・日本円のデジタル資料販売。配送・在庫管理・定期購入は対象外とする。</p><div class="note">本書は実装前の設計案。サービス契約、実際の課金、本番公開は実施していない。提供事業者・予算・販売条件は「11 決定が必要な事項」で確定する。</div><h3>初期リリースの前提</h3><ul><li>購入前にメール認証。数量は1固定、支払方法はホスト型のカード決済から開始する。</li><li>税込価格を表示し、金額は円の整数で管理する。税区分・端数処理は事業者の条件に合わせて確定する。</li><li>注文に商品名・価格・利用許諾・ファイルのバージョンを記録する。</li><li>初期版の返金は注文全体の全額返金。商品単位・部分返金は後続拡張とする。</li><li>公開停止後も購入済みバージョンを再取得できる設計を基本とする。提供期間は販売条件で明示する。</li></ul><h3>現行からの変更</h3><p>商品情報と注文の正本をサーバーへ移し、localStorageはカートの補助保存だけに使う。模擬決済は検証用に限定する。公開フォルダにある販売用PPTXを非公開ストレージに移す。既存のデモ注文は購入証明として移行しない。</p></section>
+<section id="architecture"><h2>02 システム構成</h2><p>フロントエンドはReact・TypeScript・Viteを継続利用する。バックエンドはNode.js・TypeScript、データベースはPostgreSQL、ファイルはS3互換の非公開オブジェクトストレージ、決済はStripe Checkoutを候補とする。認証・メール配信・実行基盤の事業者は未確定。</p>
+<svg class="diagram" viewBox="0 0 780 460" role="img" aria-labelledby="diagram-title diagram-desc"><title id="diagram-title">本番システムの構成図</title><desc id="diagram-desc">利用者のReact画面からAPIとホスト型決済へ接続する。APIは認証基盤、データベース、非公開ストレージと連携する。決済通知はAPIへ届き、ジョブが購入完了メールを送る。</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#526477"/></marker></defs>
+<rect class="box" x="20" y="25" width="210" height="70" rx="10"/><text x="125" y="54" text-anchor="middle">利用者・管理者</text><text x="125" y="77" text-anchor="middle">React画面 / HTTPS</text>
+<rect class="box" x="310" y="25" width="190" height="70" rx="10"/><text x="405" y="54" text-anchor="middle">APIサーバー</text><text x="405" y="77" text-anchor="middle">価格・注文・権限の判定</text>
+<rect class="box" x="570" y="25" width="190" height="70" rx="10"/><text x="665" y="54" text-anchor="middle">認証基盤</text><text x="665" y="77" text-anchor="middle">メール認証 / 管理者MFA</text>
+<rect class="box" x="20" y="170" width="210" height="80" rx="10"/><text x="125" y="199" text-anchor="middle">ホスト型決済</text><text x="125" y="222" text-anchor="middle">Stripe Checkout（候補）</text>
+<rect class="box" x="310" y="170" width="190" height="80" rx="10"/><text x="405" y="199" text-anchor="middle">PostgreSQL</text><text x="405" y="222" text-anchor="middle">注文・購入権限・イベント</text>
+<rect class="box" x="570" y="170" width="190" height="80" rx="10"/><text x="665" y="199" text-anchor="middle">非公開ストレージ</text><text x="665" y="222" text-anchor="middle">署名付きURLでPPTX取得</text>
+<rect class="box" x="310" y="335" width="190" height="70" rx="10"/><text x="405" y="364" text-anchor="middle">ジョブ・Outbox</text><text x="405" y="387" text-anchor="middle">通知・再試行・整合確認</text>
+<rect class="box" x="570" y="335" width="190" height="70" rx="10"/><text x="665" y="364" text-anchor="middle">メール配信</text><text x="665" y="387" text-anchor="middle">購入完了・問い合わせ</text>
+<path class="edge" marker-end="url(#arrow)" d="M230 60H310"/><path class="edge" marker-end="url(#arrow)" d="M500 60H570"/><path class="edge" marker-end="url(#arrow)" d="M125 95V170"/><path class="edge" marker-end="url(#arrow)" d="M230 195L310 95"/><text x="245" y="153">Webhook</text><path class="edge" marker-end="url(#arrow)" d="M405 95V170"/><path class="edge" marker-end="url(#arrow)" d="M500 95L620 170"/><path class="edge" marker-end="url(#arrow)" d="M405 250V335"/><path class="edge" marker-end="url(#arrow)" d="M500 370H570"/><text x="30" y="315">※ 公開プレビューは静的配信</text><text x="30" y="340">※ カード情報は決済事業者へ入力</text><text x="30" y="365">※ 署名付きURLで直接ダウンロード</text></svg>
+<p>APIを画面と同じオリジンの <code>/api</code> に配置し、Cookie認証とCSRF対策を適用する。公開画像と販売ファイルは保存先を分離する。URLのハッシュによる画面切替は通常のパスへ移行し、商品詳細のSEOが必要な段階で事前生成またはSSRを採用する。</p></section>
+<section id="features"><h2>03 機能一覧</h2><div class="table"><table><thead><tr><th>ID・段階</th><th>機能</th><th>基本仕様・完了条件</th></tr></thead><tbody>
+<tr><td>F01 初期</td><td>商品・検索</td><td>公開商品の一覧、カテゴリ・キーワード検索、詳細表示。対応ソフト、ページ数、サイズ、利用条件、複数プレビューを掲載する。</td></tr>
+<tr><td>F02 初期</td><td>購入者認証</td><td>メール認証・ログイン・ログアウト。同じアカウントから別端末で注文を閲覧できる。</td></tr>
+<tr><td>F03 初期</td><td>カート・最終確認</td><td>重複防止・数量1・合計表示。サーバー見積もりで価格を確認し、変更時は再確認する。購入済み商品は再ダウンロードへ案内する。</td></tr>
+<tr><td>F04 初期</td><td>決済・注文</td><td>Checkoutへ遷移。検証済み入金通知から注文を確定し、二重請求・二重権限を防ぐ。</td></tr>
+<tr><td>F05 初期</td><td>ダウンロード・履歴</td><td>本人の支払済み注文と有効な権限を確認し、5分有効の署名付きURLを発行。期限切れなら再発行する。</td></tr>
+<tr><td>F06 初期</td><td>購入完了メール</td><td>注文番号、金額、履歴ページのリンクを送信。署名付きURLやPPTXはメールに含めない。失敗は再送する。</td></tr>
+<tr><td>F07 初期</td><td>商品管理</td><td>下書き・公開・販売停止、価格編集、PPTXと画像の登録。ファイル検証完了後に公開する。</td></tr>
+<tr><td>F08 初期</td><td>注文管理・返金</td><td>注文検索、決済照会、全額返金、権限停止。操作理由と担当者を監査ログに保存する。</td></tr>
+<tr><td>F09 初期</td><td>問い合わせ</td><td>ログインなしでも送信可能。カテゴリ、メール、本文、任意の注文番号。回数制限と運営通知を備える。</td></tr>
+<tr><td>F10 初期</td><td>販売条件・法定表示</td><td>特商法表記、利用規約、個人情報方針、利用許諾、返金条件。最終確認で総額と条件を確認できる。</td></tr>
+<tr><td>F11 初期</td><td>セキュリティ・運用</td><td>管理者MFA、監視、バックアップ、復元手順、決済照合、通知再試行、本番・検証分離。</td></tr>
+<tr><td>F12 後続</td><td>並び替え・お気に入り</td><td>新着・価格順、アカウントに紐づくお気に入り。購入の必須経路を完成後に追加する。</td></tr>
+<tr><td>F13 後続</td><td>クーポン・セット販売</td><td>割引条件・期限・利用回数をサーバーで判定。セットの内訳と購入権限を注文明細に保存する。</td></tr>
+<tr><td>F14 後続</td><td>SEO・分析</td><td>商品別メタ情報・サイトマップ・構造化データ。閲覧→カート→決済→購入の集計を行い、個人情報をイベントに送らない。</td></tr>
+</tbody></table></div></section>
+<section id="screens"><h2>04 画面設計</h2><div class="table"><table><thead><tr><th>パス</th><th>画面・操作</th><th>権限</th></tr></thead><tbody>
+<tr><td><code>/</code>・<code>/products/:slug</code></td><td>商品一覧・詳細、検索、プレビュー、カート追加</td><td>公開</td></tr>
+<tr><td><code>/cart</code></td><td>商品削除・参考合計・ログインまたは購入確認へ</td><td>公開</td></tr>
+<tr><td><code>/login</code></td><td>メール認証。復帰先はサイト内の許可パスのみ</td><td>公開</td></tr>
+<tr><td><code>/checkout</code></td><td>サーバー見積もり・最終総額・利用許諾・返金条件・購入ボタン</td><td>購入者</td></tr>
+<tr><td><code>/orders/:id</code></td><td>入金確認中／完了／失敗／返金、ダウンロード。戻り画面だけで成功と表示しない</td><td>注文本人</td></tr>
+<tr><td><code>/account/orders</code></td><td>履歴のページ送り・注文詳細・再ダウンロード</td><td>購入者</td></tr>
+<tr><td><code>/guide</code>・<code>/contact</code>・<code>/legal/*</code></td><td>使い方・問い合わせ・販売条件</td><td>公開</td></tr>
+<tr><td><code>/admin/products</code></td><td>商品編集・アップロード・公開停止</td><td>商品管理者</td></tr>
+<tr><td><code>/admin/orders</code>・<code>/admin/inquiries</code></td><td>注文・返金・問い合わせ対応</td><td>運営管理者</td></tr>
+</tbody></table></div><p>基本遷移：商品一覧 → 商品詳細 → カート → ログイン → 最終確認 → 外部決済 → 注文詳細 → ダウンロード。決済キャンセルはカートへ戻し、通信障害では注文番号と確認中表示を残す。スマートフォンとキーボード操作に対応し、処理状況・入力エラーを読み上げ可能にする。</p></section>
+<section id="flows"><h2>05 業務フローと状態</h2><h3>購入と入金確認</h3><ol><li>APIが商品IDから公開状態と価格を読み、短時間有効の見積もりを返す。ブラウザの価格は信用しない。</li><li>購入者が見積もりを確認して注文を作る。見積もり失効・価格変更時は再確認を要求する。注文と注文明細をトランザクションで保存する。</li><li>注文IDと決済試行番号を冪等キーにしてCheckoutを作成する。通信失敗時は同じキーで再試行し、二重セッションを防ぐ。結果不明の間は新しい決済試行を作らない。</li><li>決済事業者からのWebhookを生の本文で署名検証し、イベントIDを一意保存して受付する。永続化できない場合は成功応答せず、再送を受ける。</li><li>ワーカーが決済の最新状態を照会し、注文との紐づけ・通貨・金額・入金済みを照合する。同一トランザクションで支払済み状態、購入権限、通知Outboxを記録する。セッション完了だけでは入金済みとしない。</li><li>戻り画面は注文APIを確認し、入金確認中なら時間を置いて再取得する。支払済みの場合にダウンロードを表示する。通知メールの障害は購入確定に影響させない。</li></ol>
+<h3>状態の分離</h3><div class="table"><table><thead><tr><th>対象</th><th>状態と遷移</th><th>例外の扱い</th></tr></thead><tbody><tr><td>注文</td><td>pending → confirmed / canceled</td><td>遅れて入金を確認した注文は照合後にconfirmedへ復旧する。キャンセル表示だけで入金を破棄しない。</td></tr><tr><td>決済試行</td><td>created → processing → paid / failed / expired<br>paid → refund_pending → refunded</td><td>失敗・期限切れで再試行可能。paidを古いイベントで未払いに戻さない。返金失敗時はpaidへ戻す。</td></tr><tr><td>購入権限</td><td>active → suspended / revoked<br>suspended → active / revoked</td><td>返金要求時にsuspended、返金成功でrevoked、失敗確認後にactiveへ戻す。返金済み注文を遅い入金イベントで再有効化しない。</td></tr></tbody></table></div>
+<h3>ダウンロード</h3><p>認証済み利用者 → APIで注文の所有者・入金・有効な購入権限・購入時のファイルバージョンを確認 → 5分有効の署名付きURL → 非公開ストレージから取得。URLはログへ残さず、発行応答はキャッシュ禁止とする。署名付きURLは期限内の共有を完全には防げない。返金後も発行済みURLは最長5分利用でき、取得済みファイルは回収できない。</p>
+<h3>返金・異議申し立て</h3><p>管理者が理由を入力 → 権限を一時停止 → 冪等キー付きで返金要求 → 通知または照会で結果確定 → 全額返金なら権限取消。タイムアウトは結果不明として照合し、再請求・再返金を避ける。異議申し立ては権限を一時停止し、運営へ通知する。解決結果と販売条件に基づき再開または取消を記録する。</p></section>
+<section id="data"><h2>06 データ設計</h2><p>主キーはUUID、日時はUTCで保存し画面では日本時間を表示する。金額は整数、通貨は初期版JPY。外部キーと一意制約で整合性を担保する。</p><div class="table"><table><thead><tr><th>テーブル</th><th>主な項目</th><th>関連・制約</th></tr></thead><tbody>
+<tr><td>users</td><td>id, auth_subject, email, role, status</td><td>認証基盤のsubjectを一意にする。購入者・商品管理者・運営管理者の役割を分ける。</td></tr>
+<tr><td>products</td><td>id, slug, name, description, category, price_yen, tax_category, status, current_version_id</td><td>slugは一意、価格は0以上。販売停止は論理状態で管理。</td></tr>
+<tr><td>product_versions</td><td>id, product_id, version, object_key, checksum, file_size, page_count, compatible_software, preview_keys, license_version, validation_status</td><td>product_id＋versionは一意。販売済みバージョンは上書き・削除しない。</td></tr>
+<tr><td>quotes</td><td>id, user_id, items_snapshot, total_yen, currency, expires_at, consumed_order_id</td><td>価格確認用の見積もり。期限と所有者を検証し、同じ見積もりで注文を重複作成しない。</td></tr>
+<tr><td>orders</td><td>id, user_id, status, total_yen, tax_yen, currency, accepted_terms_version, accepted_at, created_at</td><td>本人の注文のみ閲覧。決済後の商品変更に影響されない。</td></tr>
+<tr><td>order_items</td><td>id, order_id, product_id, product_version_id, name_snapshot, unit_price_yen, tax_yen, license_snapshot</td><td>order_id＋product_idは一意。初期版は数量1。</td></tr>
+<tr><td>payments / refunds</td><td>id, order_id, attempt_no, provider_id, amount_yen, currency, status, idempotency_key, reason</td><td>決済試行ごとの履歴。provider_id・冪等キーは一意。refundsはpayment_idで紐づく。</td></tr>
+<tr><td>entitlements</td><td>id, user_id, order_item_id, status, granted_at, revoked_at</td><td>order_item_idは一意。ダウンロードの権限判定に使用。</td></tr>
+<tr><td>webhook_events</td><td>provider_event_id, type, status, received_at, processed_at, attempts, last_error</td><td>イベントIDを一意化し、再送・順不同に対応。処理に必要な情報だけを保存する。</td></tr>
+<tr><td>outbox_jobs</td><td>id, type, dedupe_key, payload, status, attempts, next_run_at</td><td>dedupe_keyは一意。購入確定と同じDBトランザクションで作成する。</td></tr>
+<tr><td>inquiries / audit_logs</td><td>問い合わせ：email, category, order_id, body, status<br>監査：actor_id, action, target_id, reason, request_id, created_at</td><td>注文番号の入力だけで注文情報を開示しない。監査ログは通常操作で編集不可。</td></tr>
+<tr><td>後続：favorites / coupons / bundles</td><td>user_id＋product_id、割引条件・利用履歴、セットの構成商品</td><td>お気に入りは組合せ一意。クーポン消費は同時利用を考慮したトランザクション。</td></tr>
+</tbody></table></div><p>関連：users 1:N orders、orders 1:N order_items・payments、products 1:N product_versions、order_items 1:1 entitlements、payments 1:N refunds。決済済み注文の物理削除は行わず、退会時の個人情報削除と取引記録の保存を分離する。</p></section>
+<section id="api"><h2>07 API設計</h2><p>JSONを基本とし、一覧にはカーソルページングを設ける。エラーは <code>{ code, message, requestId }</code> を返す。400は入力不正、401は未認証、404は不存在または閲覧権限なし、409は価格変更・状態競合、429は回数制限、503は一時障害。更新処理はCookie認証に加えCSRFトークンを検証する。</p><div class="table"><table><thead><tr><th>メソッド・パス</th><th>入出力・責務</th><th>権限</th></tr></thead><tbody>
+<tr><td>GET /api/products<br>GET /api/products/:id</td><td>検索条件・カテゴリ → 公開商品情報。非公開object_keyを返さない。</td><td>公開</td></tr>
+<tr><td>POST /api/quotes</td><td>productIds → quoteId、内訳、税込合計、期限、購入済み判定。</td><td>購入者</td></tr>
+<tr><td>POST /api/orders</td><td>quoteId、同意した規約バージョン → orderId。Idempotency-Keyを必須にし、同じキーで異なる本文は409。</td><td>購入者</td></tr>
+<tr><td>POST /api/orders/:id/checkout</td><td>未払い注文 → checkoutUrl。同時要求はロックし、同一の有効決済試行を返す。</td><td>注文本人</td></tr>
+<tr><td>GET /api/orders<br>GET /api/orders/:id</td><td>本人の注文履歴・状態・明細。認証主体から所有者を判定する。</td><td>購入者</td></tr>
+<tr><td>POST /api/order-items/:id/download</td><td>所有者・権限確認 → downloadUrl、expiresAt。Cache-Control: no-store。</td><td>購入者</td></tr>
+<tr><td>POST /api/webhooks/stripe</td><td>生の本文と署名ヘッダーを検証、イベントを永続化。Cookie認証・CSRFの代わりに署名で認証。</td><td>決済事業者</td></tr>
+<tr><td>POST /api/inquiries</td><td>メール、カテゴリ、本文、任意の注文番号 → 受付ID。回数制限、文字数上限。</td><td>公開</td></tr>
+<tr><td>POST /api/admin/products<br>PATCH /api/admin/products/:id</td><td>商品登録・編集・公開停止。更新バージョンで競合検出。</td><td>商品管理者</td></tr>
+<tr><td>POST /api/admin/products/:id/uploads<br>POST /api/admin/uploads/:id/complete</td><td>許可された形式・サイズの一時アップロード先を発行。検証後に商品バージョンを登録。</td><td>商品管理者</td></tr>
+<tr><td>GET /api/admin/orders<br>POST /api/admin/orders/:id/refunds</td><td>注文検索・理由付き全額返金要求。返金にもIdempotency-Key必須。</td><td>運営管理者</td></tr>
+<tr><td>GET /api/admin/inquiries<br>PATCH /api/admin/inquiries/:id</td><td>問い合わせ一覧・対応状況更新。</td><td>運営管理者</td></tr>
+</tbody></table></div><p>認証開始・コールバック・ログアウトは採用する認証基盤に合わせて定義する。認証コールバックではstate・nonce等を検証する。後続APIはお気に入り登録・削除、クーポン見積もり、セット商品取得を追加する。</p></section>
+<section id="security"><h2>08 認証と権限</h2><ul><li>購入者はメール認証を行い、短時間・一回限りのログインリンクまたはコードを用いる。失敗回数を制限し、メールの登録有無を応答で漏らさない。</li><li>セッションはSecure・HttpOnly・SameSite属性のCookieで管理する。失効・ログアウト・管理者権限変更をサーバーで反映する。トークンはlocalStorageへ保存しない。</li><li>管理者はMFA必須。返金は再認証を要求し、役割判定はAPIで実施する。商品管理者には返金権限を与えない。</li><li>HTTPS、CSRF、CSP、出力エスケープ、許可リスト型入力検証、SQLパラメータ化、認証・問い合わせ・ダウンロードの回数制限を設ける。</li><li>Webhook署名検証用の秘密鍵とAPIキーは秘密情報管理サービスに保存し、フロントエンドやGitに含めない。本番とテストで鍵を分離する。</li><li>販売用バケットは公開禁止。アップロードはPPTXの内部構造・拡張子・実形式・サイズ・マルウェアを検証し、ZIP展開量を制限する。画像は安全な形式に再生成し、未検証SVGを公開しない。</li><li>カード情報は自社画面・API・ログで取り扱わず、決済事業者の画面へ入力する。ログに秘密鍵・認証リンク・署名付きURL・カード情報を記録しない。</li></ul></section>
+<section id="operations"><h2>09 運用・非機能要件</h2><p>次の数値は初期の目標案。アクセス規模・費用・採用基盤を踏まえて確定し、検証環境で測定する。</p><div class="table"><table><thead><tr><th>項目</th><th>設計・目標</th></tr></thead><tbody>
+<tr><td>性能・可用性</td><td>初期想定：商品100件、月1,000注文、同時利用50人。通常APIのp95を1秒以内、月間可用性99.9%を目標とする。外部決済・ファイル転送は別測定。</td></tr>
+<tr><td>監視</td><td>APIエラー、応答時間、署名検証失敗、未処理Webhook、通知失敗、決済・注文の不一致を監視。処理待ち5分超、5xx率5分間で1%超を通知の初期基準とする。</td></tr>
+<tr><td>再試行・照合</td><td>Outboxを指数バックオフで最大8回再試行し、失敗キューへ移す。支払確認中15分超・返金結果不明を5分周期で照会し、日次で決済と注文を突合する。重複メールは配信事業者の冪等機能を使い、結果不明なら照会する。</td></tr>
+<tr><td>バックアップ</td><td>DBの継続バックアップと日次バックアップ、ファイルのバージョニング。RPO 1時間・RTO 4時間を目標とし、四半期ごとに復元訓練。販売済みファイルの誤削除も対象にする。</td></tr>
+<tr><td>環境・デプロイ</td><td>開発・検証・本番のDB、バケット、認証、決済キーを分離する。CIで型チェック・API/E2Eテスト・依存関係検査。DB変更は後方互換を優先し、戻し方を準備する。</td></tr>
+<tr><td>障害対応</td><td>決済障害時は新規購入を停止し既存履歴を提供。保存障害では権限確認を省略しない。入金済み・権限未付与を照合して復旧。問い合わせ案内と担当者・連絡手段を決める。</td></tr>
+<tr><td>個人情報・保存期間</td><td>収集は認証用メールと取引・問い合わせ情報を基本とする。運用ログ90日、問い合わせ対応完了後1年を候補にし、注文・監査・バックアップの保存期間は会計・法務上の条件で確定する。退会・開示・削除要求の対応手順を用意する。</td></tr>
+<tr><td>法定表示・利用条件</td><td>運営者、連絡先、税込価格、追加費用、支払方法・時期、提供時期、返金条件、動作環境、利用許諾を掲載する。最終確認画面の表示と合わせて公開前に実際の販売条件を確認する。</td></tr>
+<tr><td>アクセシビリティ・分析</td><td>WCAG 2.2 AAを目標にラベル・フォーカス・コントラスト・エラー通知を確認する。分析導入時はCookie等の取扱いを明示し、必要な同意を管理する。</td></tr>
+</tbody></table></div></section>
+<section id="tests"><h2>10 テストと移行</h2><div class="table"><table><thead><tr><th>ケース</th><th>受入条件</th></tr></thead><tbody><tr><td>通常購入・別端末</td><td>テスト決済成功後に注文・権限・メールが整合し、同じアカウントから再取得できる。</td></tr><tr><td>価格改ざん・変更・販売停止</td><td>送信価格を採用せず、変更は再確認。非公開商品を新規購入できない。</td></tr><tr><td>二重クリック・Webhook重複・順不同</td><td>決済、権限、通知ジョブは重複しない。返金後に入金イベントを再送しても権限を復活させない。</td></tr><tr><td>偽Webhook・他人の注文</td><td>署名不正は拒否。他人のIDを指定しても注文・PPTXを取得できない。</td></tr><tr><td>決済失敗・離脱・通知遅延</td><td>未入金で取得不可。遅延入金は照合で復旧し、重複請求をしない。</td></tr><tr><td>返金・通信タイムアウト・異議申し立て</td><td>結果不明を追跡し、返金成功で権限取消、失敗で復旧。再送で二重返金しない。</td></tr><tr><td>期限切れ・ファイル更新</td><td>URLの期限切れ後は再発行。商品更新後も購入時のファイルを取得できる。</td></tr><tr><td>メール・DB・ストレージ障害</td><td>購入記録を失わず再試行できる。障害時に権限を迂回しない。バックアップから復元可能。</td></tr><tr><td>管理・アップロード・スマートフォン</td><td>権限外操作を拒否し、不正ファイルを公開しない。購入経路をモバイルとキーボードで完了できる。</td></tr></tbody></table></div><h3>開発・移行の順序</h3><ol><li>販売条件・基盤を確定し、DB・API・認証を構築する。</li><li>6商品をDBへ登録。販売用PPTXを非公開保存し、公開サンプルと販売商品を明確に分ける。</li><li>見積もり・注文・テスト決済・Webhook・購入権限を実装する。</li><li>履歴・メール・管理画面・返金・問い合わせを実装する。</li><li>監視・復元・権限テスト・販売表示を確認し、本番設定へ切り替える。</li><li>公開済み販売ファイルを配信元とビルド成果物から除去し、CDNキャッシュも削除する。過去に取得された公開サンプルは回収できないため、有料版は別ファイルとして扱う。</li><li>本番決済の検証手順と返金手順を運営者が確認した後に販売を開始する。</li></ol><p>現行デモの型チェック・ビルド・PC／モバイル計6件のテストは既存挙動の参考とし、本番の認証・決済・アクセス制御は追加テストで検証する。localStorageのデモ注文から本番の購入権限は発行しない。</p></section>
+<section id="decisions"><h2>11 決定が必要な事項</h2><div class="table"><table><thead><tr><th>事項</th><th>本書の案</th><th>確定時期</th></tr></thead><tbody><tr><td>提供事業者・費用</td><td>Node.js / PostgreSQL / S3互換ストレージ / Stripe Checkout。認証・メール・ホスティングは比較して選定。</td><td>基盤実装前</td></tr><tr><td>販売者・税・領収書</td><td>国内向けJPY・税込表示。事業者区分、税率、インボイス・領収書要否を確定。</td><td>決済設計確定前</td></tr><tr><td>返金・再ダウンロード</td><td>初期は全額返金のみ。提供期間、返金可能条件、改訂版の提供範囲、異議申し立て時の扱いを定める。</td><td>商品公開前</td></tr><tr><td>ファイル制限・利用許諾</td><td>PPTX上限50MBを初期候補とする。対応ソフト・商用利用・再配布条件を商品ごとに確定。</td><td>アップロード実装前</td></tr><tr><td>保存期間・運営体制</td><td>個人情報・取引記録の保存期間、問い合わせ応答時間、障害対応担当、復元権限を定める。</td><td>販売開始前</td></tr><tr><td>後続機能</td><td>並び替え、お気に入り、クーポン、セット販売、SEO、分析を利用状況に応じて追加。</td><td>初期リリース後</td></tr></tbody></table></div><h3>実装時に確認する公式資料</h3><ul><li><a href="https://docs.stripe.com/payments/checkout">Stripe Checkout</a>・<a href="https://docs.stripe.com/webhooks">Webhook</a>：採用時のAPI・イベント仕様、料金、対応方法を確認する。</li><li><a href="https://www.no-trouble.caa.go.jp/what/mailorder/">消費者庁・通信販売の案内</a>：表示と最終確認画面を実際の販売条件に合わせる。</li><li><a href="https://www.ppc.go.jp/">個人情報保護委員会</a>：個人情報の取扱いと保存・削除の方針を確認する。</li></ul><p>参考リンクは確認先であり、本書作成時に最新の公式仕様・料金を照合したものではない。</p></section>
+</main></div><footer>Slide Market · 実運用に向けた基本設計書 v1.0 · 印刷・PDF保存対応</footer>
+</body></html>
