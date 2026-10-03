@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: slide-market
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 24.19.0
+      - key: SHOP_STORAGE
+        value: starserver
+      - key: SHOP_SESSION_MODE
+        value: memory
+      - key: SHOP_BACKUP_INTERVAL_MS
+        value: "0"
+      - key: SITE_URL
+        sync: false
+      - key: STARSERVER_API_URL
+        sync: false
+      - key: STARSERVER_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

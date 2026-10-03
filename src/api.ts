@@ -5,7 +5,7 @@ export type Quote={id:string;items:string[];total:number;subtotal:number;discoun
 export type Page<T>={items:T[];nextCursor:string|null};
 export type Purchases=Record<string,{orderId:string;name:string}>;
 export class ApiError extends Error {constructor(message:string,public code:string,public requestId:string,public details?:unknown){super(`${message}${requestId?'（確認番号：'+requestId+'）':''}`);}}
-export type Session={role:string;csrf:string;termsVersion:string};
+export type Session={role:string;csrf:string;termsVersion:string;user?:{id:string;name:string}|null;googleEnabled?:boolean;loginRequired?:boolean;storage?:'local'|'starserver';sessionMode?:'memory'|'persistent'};
 let session:Session|null=null;
 let loading:Promise<Session>|null=null;
 export async function initialize(){
@@ -16,7 +16,12 @@ export async function api<T>(path:string,method='GET',data?:unknown,key?:string)
  const s=await initialize();
  const r=await fetch(path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':session?.csrf||s.csrf,...(key?{'Idempotency-Key':key}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
  const result=await r.json();
- if(!r.ok)throw new ApiError(result.message||'処理に失敗しました。',result.code||'UNKNOWN_ERROR',result.requestId||'',result.details);
+ if(!r.ok){
+  if(result.code==='SESSION_EXPIRED'){
+   session=null;loading=null;await initialize();window.dispatchEvent(new Event('slide-session-expired'));
+  }
+  throw new ApiError(result.message||'処理に失敗しました。',result.code||'UNKNOWN_ERROR',result.requestId||'',result.details);
+ }
  if(result.csrf){session={...session!,...result};loading=Promise.resolve(session!);}
  return result;
 }

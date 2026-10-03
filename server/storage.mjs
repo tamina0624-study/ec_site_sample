@@ -48,7 +48,7 @@ export function openStore(dataDir, fileDir) {
  const list=kind=>db.prepare('SELECT value FROM documents WHERE kind=? ORDER BY rowid').all(kind).map(r=>JSON.parse(r.value));
  const put=(kind,id,value)=>db.prepare('INSERT INTO documents VALUES (?,?,?) ON CONFLICT(kind,id) DO UPDATE SET value=excluded.value').run(kind,id,JSON.stringify(value));
  const remove=(kind,id)=>db.prepare('DELETE FROM documents WHERE kind=? AND id=?').run(kind,id);
- const tx=fn=>{db.exec('BEGIN IMMEDIATE');try{const result=fn();db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}};
+ const tx=fn=>{db.exec('BEGIN IMMEDIATE');try{const result=fn();if(result&&typeof result.then==='function')return result.then(value=>{db.exec('COMMIT');return value;},error=>{db.exec('ROLLBACK');throw error;});db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}};
  const snapshot=(bytes)=>{const checksum=hash(bytes);const path=resolve(fileDir,'versions',`${checksum}.pptx`);if(!existsSync(path))writeFileSync(path,bytes,{flag:'wx',mode:0o600});return checksum;};
  const initial=JSON.parse(readFileSync(new URL('../src/products.json',import.meta.url)));
  for(const p of initial)if(!get('products',p.id)){

@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node --env-file-if-exists=.env server/start.mjs",
+    "storage:import": "node --env-file-if-exists=.env scripts/import-starserver.mjs",
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build && node scripts/generate-seo.mjs",
     "preview": "vite preview --host 0.0.0.0",
@@ -12,7 +14,7 @@
     "backup": "node scripts/local-data.mjs backup",
     "restore": "node scripts/local-data.mjs restore",
     "admin:reset": "node scripts/local-data.mjs admin-reset",
-    "test:server": "node --test tests/server.test.mjs tests/assets.test.mjs",
+    "test:server": "node --test tests/server.test.mjs tests/assets.test.mjs tests/google-auth.test.mjs tests/hosted.test.mjs tests/remote.test.mjs",
     "admin:otp": "node scripts/local-data.mjs admin-code",
     "assets:prepare": "node scripts/prepare-assets.mjs",
     "tools:check": "node scripts/prepare-assets.mjs --check",

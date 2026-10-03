@@ -134,10 +134,12 @@ test('検査必須モードでは未検査ファイルを販売せず、既存�
 });
 
 test('ファイル処理中は競合を返し、完了後も古いrevisionの更新を拒否する',async()=>{
- const assets={mode:'required',scanner:'/missing/clamscan',database:'',office:'/missing/libreoffice',raster:'/missing/pdftoppm'};const f=await localFixture({assets});try{
-  const {writeFileSync}=await import('node:fs');assets.scanner=resolve(f.root,'scanner.mjs');writeFileSync(assets.scanner,`#!${process.execPath}\nawait new Promise(r=>setTimeout(r,200));process.exit(0);`,{mode:0o700});
+ const assets={mode:'required',scanner:'/missing/clamscan',database:'',office:'/missing/libreoffice',raster:'/missing/pdftoppm'};const f=await localFixture({assets});const {writeFileSync}=await import('node:fs');const release=resolve(f.root,'release-scanner');let first;try{
+  // Hold the actual scan until the competing request is checked; version checks
+  // must not race against the same arbitrary 200ms delay.
+  assets.scanner=resolve(f.root,'scanner.mjs');writeFileSync(assets.scanner,`#!${process.execPath}\nimport {existsSync} from 'node:fs';\nif(process.argv.includes('--version'))process.exit(0);\nconst deadline=Date.now()+5000;while(!existsSync(${JSON.stringify(release)})){if(Date.now()>deadline)process.exit(2);await new Promise(r=>setTimeout(r,10));}process.exit(0);`,{mode:0o700});
   const send=await f.client();await send('/api/admin/login','POST',{password:f.password('admin')});const p=(await send('/api/admin/products')).data.find(p=>p.id==='proposal');
-  const first=send('/api/admin/products/proposal/prepare','POST',{revision:p.revision});let busy=false;for(let i=0;i<20;i++){busy=(await send('/api/admin/health')).data.assets.busy;if(busy)break;}assert.equal(busy,true);
-  assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).data.code,'ASSET_BUSY');assert.equal((await first).status,200);assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).status,409);
- }finally{await f.close();}
+  first=send('/api/admin/products/proposal/prepare','POST',{revision:p.revision});let busy=false;for(let i=0;i<20;i++){busy=(await send('/api/admin/health')).data.assets.busy;if(busy)break;}assert.equal(busy,true);
+  assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).data.code,'ASSET_BUSY');writeFileSync(release,'release');assert.equal((await first).status,200);assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).status,409);
+ }finally{writeFileSync(release,'release');if(first)await first.catch(()=>{});await f.close();}
 });

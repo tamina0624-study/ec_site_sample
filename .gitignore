@@ -5,3 +5,7 @@ playwright-report/
 data/
 backups/
 private/downloads/versions/
+.env
+.env.*
+!.env.example
+starserver/config.php

@@ -1,8 +1,11 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createShop } from './server/shop.mjs';
-export default defineConfig({server:{fs:{deny:['**/private/**','**/data/**','**/backups/**','**/server/**','**/scripts/local-data.mjs','.env','.env.*','*.{crt,pem}','**/.git/**']}},plugins:[{
+export default defineConfig(({mode})=>{
+ const env=loadEnv(mode,process.cwd(),'');
+ for(const [key,value]of Object.entries(env))if(/^(SHOP_|STARSERVER_|GOOGLE_|LOCAL_|SITE_URL$|CLAM|LIBREOFFICE_|PDFTOPPM_)/.test(key)&&process.env[key]===undefined)process.env[key]=value;
+ return {server:{fs:{deny:['**/private/**','**/data/**','**/backups/**','**/server/**','**/scripts/local-data.mjs','**/starserver/**','.env','.env.*','*.{crt,pem}','**/.git/**']}},plugins:[{
  name:'local-shop-api',
  configureServer(server){const shop=createShop();server.middlewares.use(shop.handle);server.httpServer?.once('close',shop.close);},
  configurePreviewServer(server){
@@ -12,8 +15,9 @@ export default defineConfig({server:{fs:{deny:['**/private/**','**/data/**','**/
    const match=req.url?.split('?')[0].match(/^\/products\/([a-zA-Z0-9-]+)\/?$/);
    if(!match || !['GET','HEAD'].includes(req.method))return next();
    const file=resolve('dist','products',match[1],'index.html');
-   if(shop.store.get('products',match[1])?.status!=='published'||!existsSync(file))return next();
-   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:readFileSync(file));
+   void Promise.resolve(shop.store.get('products',match[1])).then(p=>{
+    if(p?.status!=='published'||!existsSync(file))return next();
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:readFileSync(file));
+   }).catch(next);
   });
- }
-}]});
+ }}]};});

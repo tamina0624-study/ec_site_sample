@@ -29,7 +29,7 @@ test('検索・詳細・保存・決済失敗・成功・ダウンロード・�
  await expect(page.getByRole('link',{name:'ダウンロード ↓'})).toBeVisible();
  const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'模擬領収書を表示・印刷'}).click();const receipt=await popup;await expect(receipt.getByRole('heading',{name:'模擬領収書',exact:true})).toBeVisible();await expect(receipt.locator('body')).toContainText('実入金なし');expect(await receipt.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await receipt.close();
  const receiptDownload=page.waitForEvent('download');await page.getByRole('link',{name:'HTMLを保存',exact:true}).click();expect((await receiptDownload).suggestedFilename()).toBe('demo-receipt.html');
- await page.getByText('購入時に同意した利用規約・返金条件',{exact:true}).click();await expect(page.locator('details')).toContainText('local-2026-10-01');
+ await page.getByText('購入時に同意した利用規約・返金条件',{exact:true}).click();await expect(page.locator('details')).toContainText('demo-2026-10-03');
  await page.goto('/');await page.getByRole('link',{name:'購入済み・再取得',exact:true}).click();await expect(page.getByRole('link',{name:'ダウンロード ↓'})).toBeVisible();
  await page.getByRole('link',{name:'カート 0'}).click();
  await expect(page.getByRole('heading',{name:'カートは空です'})).toBeVisible();
