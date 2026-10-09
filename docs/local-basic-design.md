@@ -1,6 +1,6 @@
 # Slide Market ローカル基本設計
 
-更新日：2026年10月1日。現在のコードを確認して記載した実装仕様です。[README](../README.md) は操作手順、[基本設計書（HTML）](production-basic-design.html) は実装状況と将来の実販売設計を扱います。外部サービスの登録・課金・実返金・外部メール送信はありません。
+更新日：2026年10月9日。現在のコードを確認して記載した実装仕様です。[README](../README.md) は操作手順、[実装状況と残作業](implementation-status.md) は現時点の確認結果、[基本設計書（HTML）](production-basic-design.html) は将来の実販売設計を扱います。Google OAuthはコード対応済みですが、この環境は資格情報未設定です。実決済・実返金・外部メール送信はありません。
 
 ## 構成と責務
 
@@ -11,6 +11,7 @@
 | `src/AdminSecurity.tsx` | MFA設定・解除・復旧コードの表示 |
 | `src/api.ts` | APIの型、セッション初期化、CSRFヘッダー、ローカル分析イベント |
 | `server/shop.mjs` | APIルーティング、所有者・役割・状態の照合、価格・クーポン計算、通知の周期処理 |
+| `server/google-auth.mjs` | Google OIDC discovery、認可コード・state・nonce・PKCEの検証 |
 | `server/assets.mjs` | ClamAV検査、外部変換ツール実行、画像キャッシュ |
 | `server/receipts.mjs` | 購入時の模擬領収書保存と印刷用HTML |
 | `scripts/prepare-assets.mjs` | 実行ファイル確認・既存ファイル版の準備 |
@@ -32,12 +33,12 @@ Node.js 24を使用します。商品はAPIから取得し、JSONは初期取り
 | `/`・`#home` | 一覧・検索・並び替え・お気に入り | 公開 |
 | `/products/商品ID`・`#product/商品ID` | 詳細・テキストプレビュー | 公開商品 |
 | `#cart`・`#checkout` | カート・見積もり・規約同意・模擬購入 | ブラウザセッション |
-| `#order/注文ID`・`#history` | 注文完了・履歴・取得リンク | 同じブラウザの注文 |
+| `#order/注文ID`・`#history` | 注文完了・履歴・取得リンク | 匿名時は同じブラウザ、ログイン時は同じGoogleアカウントの注文 |
 | `#guide`・`#contact` | ガイド・問い合わせ | 公開 |
 | `#legal/terms`・`#legal/privacy`・`#legal/refund`・`#legal/commerce` | 規約・個人情報・返金・特商法の準備用ページ | 公開、実販売者情報は未設定 |
 | `#admin` | 管理者ログイン・各管理タブ | adminは全機能、editorは商品操作・自身の認証設定 |
 
-購入者はメール本人確認済みの会員ではなく、Cookieで識別するブラウザです。購入者セッションは30日、管理ログインは1時間で失効します。パスワードは初回にローカルファイルへ生成し、DBにはsalt付きscryptのハッシュを保存します。更新APIには `X-CSRF-Token` が必要です。役割ごとに任意のTOTP MFAを設定できます。30秒・6桁・前後1ステップを許容し、使用済みステップを拒否します。復旧コード8個はハッシュ保存し、各1回のみ使用できます。設定待ちは5分有効。設定確定時に同じ役割の他セッションを解除します。返金はパスワードと設定済みMFAで再認証し、5分有効です。editorもログアウト・自身の認証設定が可能です。
+購入者は匿名時はCookieで識別し、Google OAuthを設定した環境ではGoogleが検証したメールアドレスとsubjectに対応するアカウントでもログインできます。同じアカウントの注文・お気に入りは端末間で共有します。初回ログイン時に現在のブラウザの匿名注文・お気に入りをアカウントへ引き継ぎます。Google認証はstate・nonce・PKCEを使い、アカウント連携・購入者セッションはHttpOnly Cookieで管理します。ログイン開始時のCookieは `SameSite=Lax`、本番HTTPSでは `SHOP_COOKIE_SECURE=true` を設定します。購入者セッションは30日、管理ログインは1時間で失効します。更新APIには `X-CSRF-Token` が必要です。役割ごとに任意のTOTP MFAを設定できます。30秒・6桁・前後1ステップを許容し、使用済みステップを拒否します。復旧コード8個はハッシュ保存し、各1回のみ使用できます。設定待ちは5分有効。設定確定時に同じ役割の他セッションを解除します。返金はパスワードと設定済みMFAで再認証し、5分有効です。editorもログアウト・自身の認証設定が可能です。
 
 ## SQLiteの実テーブル
 
@@ -45,12 +46,14 @@ Node.js 24を使用します。商品はAPIから取得し、JSONは初期取り
 
 | テーブル | 主な項目・役割 |
 | --- | --- |
+| accounts | id（Google subject）、email、name、created_at、updated_at。Googleアカウント |
 | sessions | id。ブラウザセッションの識別子 |
-| local_sessions | id、role、expires、csrf。セッションの権限と期限 |
-| orders | id、session_id、date、total、request_key、request_body。session_idとrequest_keyの組合せ一意 |
+| local_sessions | id、role、expires、csrf、account_id。セッションの権限・期限・任意の購入者アカウント |
+| orders | id、session_id、account_id、date、total、request_key、request_body。session_idとrequest_keyの組合せ一意 |
 | items | order_id、product_id、name、price。注文削除時に連動削除、order_idとproduct_idの組合せ一意 |
 | documents | kind、id、value（JSON）。kindとidの組合せ一意 |
 | favorites | session_id、product_id。組合せ一意 |
+| account_favorites | account_id、product_id。アカウント単位のお気に入り |
 | download_tokens | token_hash、session_id、order_id、product_id、expires。取得時にも照合 |
 | metrics | day、event、count。UTC日付とイベントの組合せ一意 |
 
@@ -64,7 +67,9 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 
 | メソッド・パス | 入出力・役割 |
 | --- | --- |
-| GET /api/session | role、csrf、termsVersion |
+| GET /api/session | role、csrf、termsVersion、account、googleAuthConfigured |
+| GET /api/auth/google、GET /api/auth/google/callback | Google OIDC開始・state/nonce/PKCE検証後のログイン |
+| POST /api/auth/logout | 購入者アカウントのログアウト |
 | GET /api/products | 公開商品の情報。検索と並び替えは画面側 |
 | GET /api/products/:id/previews/:index | 0から始まるページのテキストプレビューSVG |
 | GET・POST /api/favorites、DELETE /api/favorites/:id | お気に入り取得・登録・削除 |
@@ -76,7 +81,7 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 | GET /api/legal | 規約版と販売条件本文 |
 | POST /api/orders | quoteId、result、accepted、termsVersion。Idempotency-Key必須 |
 | DELETE /api/orders | 自分のデモ注文と取得トークンを削除 |
-| POST /api/orders/:id/download-links/:productId | 同じブラウザのpaid注文から5分有効のurl・expiresAtを発行 |
+| POST /api/orders/:id/download-links/:productId | 所有するpaid注文から5分有効のurl・expiresAtを発行。ログイン済みアカウントは別端末でも再発行可能 |
 | GET /api/downloads/:token | 期限、ブラウザ、注文状態を照合して購入時のPPTXを配信 |
 | POST /api/inquiries | email、category、body、任意の自分のorderId → 受付id |
 | POST /api/admin/login、POST /api/admin/logout | パスワード・任意のrole・設定済みMFAのcodeで管理ログイン、CSRF更新、ログアウト |
@@ -104,7 +109,7 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 3. 商品の公開状態・revision・ファイル版・価格・クーポン上限を再照合する。変更・失効時は409で再確認を要求する。
 4. failureは402を返し注文を作らない。successはpaid注文・明細・規約同意・予定通知を同じトランザクションで保存する。実際の入金は照合しない。
 5. 同じ操作キー・本文の再送は同じ注文を返す。キーが同じでも本文が異なる場合は409。同じ見積もりの別キー消費も拒否する。
-6. ダウンロード発行時と取得時に同じブラウザのpaid注文を確認する。APIトークン方式であり、外部ストレージの署名付きURLではない。
+6. ダウンロード発行時と取得時にpaid注文の所有権を確認する。匿名注文は同じブラウザに限定し、ログイン時はアカウント所有者として別端末からリンクを再発行できる。APIトークン方式であり、外部ストレージの署名付きURLではない。
 7. 管理者の模擬返金はpaid → refunded。理由・時刻・監査・予定通知を保存し、発行済みトークンを削除する。返金済みの再要求は返金を繰り返さない。実決済の返金要求中・失敗・異議申し立ては未実装。
 
 商品はdraft／published／stopped。問い合わせはopen／handling／closed。通知はpending → savedで、5秒周期に期限の到来した予定通知を処理します。失敗の模擬では指数バックオフ、最大8回でfailed。手動retryでpendingへ戻します。savedは「ローカル保存完了」であり「外部メール送信成功」ではありません。通知IDは購入・返金・問い合わせごとに固定して重複作成を防ぎます。
@@ -113,11 +118,11 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 
 ## 保護・運用・移行
 
-- CookieはHttpOnly・SameSite=Strict。ローカルHTTPのためSecure属性は未設定。本番HTTPS対応は今後の実装。
+- CookieはHttpOnly・SameSite=Lax。ローカルHTTPではSecure属性を付けず、本番HTTPSでは `SHOP_COOKIE_SECURE=true` を設定する。OAuthコールバックはGoogleからのトップレベルGETとしてstate照合する。
 - 回数制限はメモリ上の1分窓。セッション全体300回、ログインは接続元IPで10回、問い合わせはセッション5回・IP30回、ダウンロードは発行と取得合算で30回、アップロード10回、分析60回。再起動でカウンタはリセットされる。
 - PPTXは50MB、ZIP展開合計100MB、1500エントリ、1〜200ページまで。マクロ・埋め込みファイル・危険なパスを拒否し、未検証のSVGはアップロードしない。ClamAV接続を実装。autoは実行ファイル不在なら未検査、requiredは未完了を拒否、offはdisabledとして記録する。定義不足・実行失敗は503、問題検出は400で登録を拒否する。既存の同じ版の検出結果も記録し、infectedは購入・公開・ダウンロード・プレビューを拒否する。
 - 初期SQLite版の注文には現在のファイルで版を固定する。過去時点の版は復元できない。既存Cookieを引き継ぐが、localStorageだけのデモ注文は移行しない。
-- リセットは自分のorders・items・取得トークンを削除し、orderMetaをresetにする。通知・問い合わせ・監査・お気に入りは残す。
+- リセットは現在の匿名セッションの注文・取得トークンを削除し、orderMetaをresetにする。ログイン中はアカウント所有の注文を削除せず、通知・問い合わせ・監査も残す。匿名のお気に入りは残し、アカウントのお気に入りは別端末から利用できる。
 - `npm run backup` は稼働中もSQLiteのバックアップAPIを利用できる。`npm run restore -- バックアップ名` と `npm run admin:reset` はサーバー停止後に実行する。復元前に現在のデータも退避する。
 - 復元はDBとファイルのSHA-256、SQLite整合性・外部キー、商品と購入時ファイルの存在を検証する。バックアップにはDB内の管理資格情報も含むが、パスワードの平文ファイルは含まない。復元後に平文ファイルとDBの資格情報が異なる場合はadmin:resetで再発行する。
 - `SHOP_DATA_DIR`、`SHOP_FILE_DIR`、`SHOP_BACKUP_DIR` で保存先を指定できる。`LOCAL_ADMIN_PASSWORD` と `LOCAL_EDITOR_PASSWORD` は資格情報の初回作成時のみ参照する。機密値をGitへ保存しない。
@@ -132,6 +137,6 @@ GETもブラウザセッションを利用します。更新処理はセッシ�
 
 ## 検証と今後の拡張
 
-`npm run build`、`npm run test:server`、`CHROMIUM_PATH=/usr/bin/chromium npm test` を使用します。2026年10月1日にPC／モバイル計14件、サーバー・ファイル処理テスト10件、実無料ツール確認2件（24ページのPNG生成・ClamAVの無害な検証定義による検出）を確認済み。公式ウイルス定義の取得・更新はこの環境では未確認。ブラウザテストは一時DBとテスト用資格情報を使うため、普段の開発サーバーを停止してから実行します。
+`npm run build`、`npm run test:server`、`CHROMIUM_PATH=/usr/bin/chromium npm test` を使用します。2026年10月9日時点でbuildとサーバー・ファイル処理テスト11件は成功。Google OIDCは外部接続をモックしたアカウント引継ぎ・端末間共有を検証済みですが、実Google認証は資格情報未設定のため未確認です。PlaywrightはChromiumのOS依存ライブラリ不足でブラウザケース未完了です。詳細は [実装状況と残作業](implementation-status.md) を参照してください。
 
-今後はメール本人確認・端末間共有・実決済と入金照合・外部配信・本番ストレージ・実販売の税と領収書・販売者情報・ウイルス定義の更新と変換プロセスのOS隔離・外部監視・別媒体へのバックアップ保管を整備します。カーソルページング、codeとrequestId付きエラー、利用許諾本文のスナップショットはローカル実装済みです。専用テーブルへの正規化は本番拡張案です。
+残作業はGoogle Cloud資格情報の設定と実アカウントでの確認、実決済・Webhook・返金照会、メール配信、アカウント削除と個人情報保持方針、本番DB・ストレージ・監視、販売条件の確定、ウイルス定義更新・変換処理のOS隔離、別媒体バックアップです。カーソルページング、codeとrequestId付きエラー、利用許諾本文のスナップショットはローカル実装済みです。専用テーブルへの正規化は本番拡張案です。

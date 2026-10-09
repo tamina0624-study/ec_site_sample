@@ -5,7 +5,7 @@ export type Quote={id:string;items:string[];total:number;subtotal:number;discoun
 export type Page<T>={items:T[];nextCursor:string|null};
 export type Purchases=Record<string,{orderId:string;name:string}>;
 export class ApiError extends Error {constructor(message:string,public code:string,public requestId:string,public details?:unknown){super(`${message}${requestId?'（確認番号：'+requestId+'）':''}`);}}
-export type Session={role:string;csrf:string;termsVersion:string};
+export type Session={role:string;csrf:string;termsVersion:string;account?:{id:string;email:string;name:string}|null;googleAuthConfigured?:boolean};
 let session:Session|null=null;
 let loading:Promise<Session>|null=null;
 export async function initialize(){

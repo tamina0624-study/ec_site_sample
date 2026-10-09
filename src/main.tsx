@@ -22,15 +22,16 @@ function App(){
  const [nextHistory,setNextHistory]=useState<string|null>(null),[historyBusy,setHistoryBusy]=useState(false),[orderLoading,setOrderLoading]=useState(false);
  const [selectedOrder,setSelectedOrder]=useState<Order|null>(null);
  const [purchases,setPurchases]=useState<Purchases>({});
+ const [session,setSession]=useState<import('./api').Session|null>(null);
  const [refresh,setRefresh]=useState(0);
  const currentRoute=()=>location.hash.slice(1)||(location.pathname.startsWith('/products/')?'product/'+location.pathname.split('/')[2]:'home');
  const [store,setStore]=useState<Store>(load);
  const [route,setRoute]=useState(currentRoute);
  const [query,setQuery]=useState(''); const [category,setCategory]=useState('すべて');
- const [notice,setNotice]=useState(''); const [failure,setFailure]=useState(false); const [error,setError]=useState('');
+ const [notice,setNotice]=useState(''); const [failure,setFailure]=useState(false); const [error,setError]=useState(()=>new URLSearchParams(location.search).get('google')==='failed'?'Googleログインに失敗しました。もう一度お試しください。':'');
  const [storageError,setStorageError]=useState(false);
  const [paying,setPaying]=useState(false); const requestKey=useRef<string | null>(null);
- useEffect(()=>{let active=true;initialize().then(async()=>{const data=await Promise.all([api<Product[]>('/api/products'),api<Page<Order>>('/api/orders'),api<string[]>('/api/favorites'),api<Purchases>('/api/purchases')]);if(active){setProducts(data[0]);setStore(s=>({...s,orders:data[1].items}));setNextHistory(data[1].nextCursor);setFavorites(data[2]);setPurchases(data[3]);setReady(true);}}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[refresh]);
+ useEffect(()=>{let active=true;initialize().then(async current=>{const data=await Promise.all([api<Product[]>('/api/products'),api<Page<Order>>('/api/orders'),api<string[]>('/api/favorites'),api<Purchases>('/api/purchases')]);if(active){setSession(current);setProducts(data[0]);setStore(s=>({...s,orders:data[1].items}));setNextHistory(data[1].nextCursor);setFavorites(data[2]);setPurchases(data[3]);setReady(true);}}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[refresh]);
  useEffect(()=>{if(!ready||route!=='checkout')return;let active=true;setQuote(null);setAccepted(false);requestKey.current=null;api<Quote>('/api/quotes','POST',{items:store.cart,coupon:couponApplied}).then(q=>{if(active)setQuote(q);}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[ready,route,store.cart.join(','),couponApplied,refresh]);
  useEffect(()=>{if(route==='home'||route.startsWith('product/'))metric('view');if(route==='checkout')metric('checkout');},[route]);
  useEffect(()=>{const id=route.split('/')[1],p=products.find(p=>p.id===id);document.title=p&&route.startsWith('product/')?`${p.name} | Slide Market`:'Slide Market';let meta=document.querySelector<HTMLMetaElement>('meta[name="description"]');if(!meta){meta=document.createElement('meta');meta.name='description';document.head.append(meta);}meta.content=p?.description||'PowerPoint資料の購入とダウンロードを体験するローカルデモ';},[route,products]);
@@ -41,7 +42,7 @@ function App(){
  const toggleFavorite=async(id:string)=>{try{await api('/api/favorites'+(favorites.includes(id)?'/'+id:''),favorites.includes(id)?'DELETE':'POST',favorites.includes(id)?undefined:{productId:id});setFavorites(await api('/api/favorites'));}catch(e){setError((e as Error).message);}};
  const heading=useRef<HTMLElement>(null); const previousRoute=useRef(route); const paymentLock=useRef(false);
  useEffect(()=>{try {localStorage.setItem(KEY,JSON.stringify({cart:store.cart}));setStorageError(false);}catch{setStorageError(true);}},[store]);
- useEffect(()=>{const handle=()=>{setRoute(currentRoute());setError('');setNotice('');setFailure(false);};window.addEventListener('hashchange',handle);return()=>window.removeEventListener('hashchange',handle);},[]);
+ useEffect(()=>{const handle=()=>{setRoute(currentRoute());setError(new URLSearchParams(location.search).get('google')==='failed'?'Googleログインに失敗しました。もう一度お試しください。':'');setNotice('');setFailure(false);};window.addEventListener('hashchange',handle);return()=>window.removeEventListener('hashchange',handle);},[]);
  useEffect(()=>{if(previousRoute.current===route)return;previousRoute.current=route;heading.current?.focus();window.scrollTo(0,0);},[route]);
  const cart=products.filter(p=>store.cart.includes(p.id)); const total=quote&&route==='checkout'?quote.total:cart.reduce((s,p)=>s+p.price,0);
  const add=(id:string)=>{const p=products.find(p=>p.id===id),owned=p&&purchaseFor(p);if(owned){location.hash='order/'+owned.orderId;return;}metric('cart');requestKey.current=null;setStore(s=>({...s,cart:[...new Set([...s.cart,id])]}));setNotice('カートに追加しました。');};
@@ -69,7 +70,7 @@ function App(){
  const downloads=(o:Order)=><div className="downloads"><p>合計：{yen(o.total)} · {o.status==='refunded'?'模擬返金済み': '模擬決済済み'}</p>{o.lines.map(line=><div className="download-row" key={line.product_id}><div><strong>{line.name}</strong><span>PowerPoint · 購入時のファイル版 {line.version?.slice(0,8)}</span></div>{o.status==='paid'?<a className="button" href="#history" onClick={async e=>{e.preventDefault();try{const link=await api<{url:string}>(`/api/orders/${o.id}/download-links/${line.product_id}`,'POST',{});const a=document.createElement('a');a.href=link.url;a.download=line.name+'.pptx';document.body.append(a);a.click();a.remove();}catch(e){setError((e as Error).message);}}}>ダウンロード ↓</a>:<span>ダウンロード権限は停止されています。</span>}</div>)}{o.receiptSnapshot&&<p><a className="text-link" href={`/api/orders/${o.id}/receipt`} target="_blank" rel="noopener noreferrer">模擬領収書を表示・印刷</a> · <a className="text-link" href={`/api/orders/${o.id}/receipt?download=1`} download>HTMLを保存</a></p>}</div>;
  return <><a className="skip" href="#content" onClick={e=>{e.preventDefault();heading.current?.focus();}}>本文へ移動</a>
  <div className="demo-bar">学習用デモ <span>実際の請求はありません。表示価格はサンプルです。</span></div>
- <header><a className="brand" href="#home"><span className="brand-icon">S<span>↗</span></span>Slide Market<span className="brand-dot">.</span></a><nav aria-label="メインナビゲーション"><a href="#home" aria-current={page==='home'?'page':undefined}>資料を探す</a><a href="#guide">ガイド</a><a className="cart-link" href="#cart">カート <span>{cart.length}</span></a></nav></header>
+ <header><a className="brand" href="#home"><span className="brand-icon">S<span>↗</span></span>Slide Market<span className="brand-dot">.</span></a><nav aria-label="メインナビゲーション"><a href="#home" aria-current={page==='home'?'page':undefined}>資料を探す</a><a href="#guide">ガイド</a>{session?.googleAuthConfigured&&(session.account?<><span title={session.account.email}>ログイン中</span><button className="text-button" onClick={()=>void api<import('./api').Session>('/api/auth/logout','POST',{}).then(()=>window.location.reload()).catch(e=>setError((e as Error).message))}>ログアウト</button></>:<a href="/api/auth/google">Googleログイン</a>)}<a className="cart-link" href="#cart">カート <span>{cart.length}</span></a></nav></header>
  <main id="content" ref={heading} tabIndex={-1}>
  {storageError&&<p role="alert" className="alert">ブラウザに保存できません。この画面を閉じるとデータが失われる場合があります。</p>}
  {error&&page!=='checkout'&&<p role="alert" className="alert">{error}</p>}

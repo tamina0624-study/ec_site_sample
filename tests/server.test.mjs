@@ -47,9 +47,46 @@ async function localFixture(options={}){
  for(const name of readdirSync('private/downloads').filter(n=>n.endsWith('.pptx')))copyFileSync(resolve('private/downloads',name),resolve(fileDir,name));
  let clock=Date.now();const shop=createShop({dataDir,fileDir,backupsDir,backupInterval:0,now:()=>clock,...options});
  const server=createServer((req,res)=>shop.handle(req,res,()=>{res.statusCode=404;res.end();}));server.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
- async function client(){let cookie='',csrf='';async function send(path,method='GET',data,key){const response=await fetch(base+path,{method,headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},...(data?{body:JSON.stringify(data)}:{})});if(response.headers.get('set-cookie'))cookie=response.headers.get('set-cookie').split(';')[0];const result=response.headers.get('content-type')?.includes('application/json')?await response.json():await response.text();if(result.csrf)csrf=result.csrf;return {status:response.status,data:result,requestId:response.headers.get('x-request-id')};}await send('/api/session');return send;}
+ async function client(){let cookie='',csrf='';async function send(path,method='GET',data,key,options={}){const response=await fetch(base+path,{method,redirect:options.redirect||'follow',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},...(data?{body:JSON.stringify(data)}:{})});const setCookie=response.headers.get('set-cookie');if(setCookie)cookie=setCookie.split(';')[0];const result=response.headers.get('content-type')?.includes('application/json')?await response.json():await response.text();if(result.csrf)csrf=result.csrf;return {status:response.status,data:result,location:response.headers.get('location'),setCookie,requestId:response.headers.get('x-request-id')};}await send('/api/session');return send;}
  return {root,dataDir,fileDir,backupsDir,shop,client,now:()=>clock,advance:ms=>{clock+=ms;},password:role=>readFileSync(resolve(dataDir,role+'-password.txt'),'utf8').trim(),async close(){server.closeAllConnections();await new Promise(ok=>server.close(ok));await shop.close();rmSync(root,{recursive:true,force:true});}};
 }
+
+test('Google OIDC login links anonymous purchases and favorites to the account',async()=>{
+ let attempt=0,checked;
+ const googleAuth={configured:true,redirectUri:'http://localhost/api/auth/google/callback',async begin(){const state=`google-state-${++attempt}`;return {url:`https://accounts.google.test/authorize?state=${state}`,state,nonce:`nonce-${attempt}`,verifier:`verifier-${attempt}`};},async authenticate(url,checks){checked={url,checks};return {id:'google-subject-1',email:'buyer@example.test',name:'Buyer'};}};
+ const f=await localFixture({googleAuth});
+ try{
+  const first=await f.client(),second=await f.client();
+  const favorite=await first('/api/favorites','POST',{productId:'proposal'});assert.equal(favorite.status,200);
+  const quote=(await first('/api/quotes','POST',{items:['proposal']})).data;
+  const order=(await first('/api/orders','POST',{quoteId:quote.id,result:'success',accepted:true,termsVersion:quote.terms},'anonymous-order')).data;
+  const start=await first('/api/auth/google','GET',undefined,undefined,{redirect:'manual'});assert.equal(start.status,302);assert.match(start.setCookie,/SameSite=Lax/);
+  const state=new URL(start.location).searchParams.get('state');assert.ok(state);
+  const callback=await first(`/api/auth/google/callback?code=authorization-code&state=${state}`,'GET',undefined,undefined,{redirect:'manual'});assert.equal(callback.status,303);
+  assert.equal(new URL(callback.location,'http://localhost').hash,'#home');
+  assert.equal(checked.url.searchParams.get('code'),'authorization-code');assert.equal(checked.checks.state,state);assert.equal(checked.checks.nonce,'nonce-1');assert.equal(checked.checks.verifier,'verifier-1');
+  const session=(await first('/api/session')).data;assert.deepEqual(session.account,{id:'google-subject-1',email:'buyer@example.test',name:'Buyer'});
+  assert.equal((await first('/api/orders')).data.items[0].id,order.id);
+  assert.deepEqual((await first('/api/favorites')).data,['proposal']);
+  const secondStart=await second('/api/auth/google','GET',undefined,undefined,{redirect:'manual'});const secondState=new URL(secondStart.location).searchParams.get('state');
+  assert.equal((await second(`/api/auth/google/callback?code=second-code&state=${secondState}`,'GET',undefined,undefined,{redirect:'manual'})).status,303);
+  await second('/api/session');
+  assert.equal((await second('/api/orders')).data.items[0].id,order.id);
+  assert.deepEqual((await second('/api/favorites')).data,['proposal']);
+  assert.equal((await second('/api/quotes','POST',{items:['proposal']})).data.code,'ALREADY_PURCHASED');
+  const secondQuote=(await second('/api/quotes','POST',{items:['sales']})).data;
+  const secondOrder=(await second('/api/orders','POST',{quoteId:secondQuote.id,result:'success',accepted:true,termsVersion:secondQuote.terms},'account-order')).data;
+  assert.equal((await first('/api/orders')).data.items.some(item=>item.id===secondOrder.id),true);
+  await second('/api/orders','DELETE');
+  assert.equal((await second('/api/orders')).data.items.some(item=>item.id===secondOrder.id),true);
+  const link=(await second(`/api/orders/${order.id}/download-links/proposal`,'POST',{})).data;
+  assert.equal((await second(link.url)).status,200);
+  assert.equal((await first('/api/auth/logout','POST',{})).status,200);
+  assert.equal((await first(`/api/orders/${order.id}`)).status,404);
+  assert.equal((await second(`/api/orders/${order.id}`)).status,200);
+  assert.equal((await first('/api/auth/google/callback?code=replay&state='+state,'GET',undefined,undefined,{redirect:'manual'})).location,'/?google=failed#home');
+ }finally{await f.close();}
+});
 
 test('TOTP・復旧コード・商品管理者ログアウト・再認証期限・復旧',async()=>{
  const {totp,verifyTotp}=await import('../server/security.mjs');
@@ -91,7 +128,7 @@ test('購入済み防止・束ねた商品・許諾スナップショット・�
   assert.equal((await other(`/api/orders/${o.id}`)).status,404);
   const legacySession=f.shop.store.db.prepare('SELECT session_id FROM orders WHERE id=?').get(o.id).session_id;
   for(let i=0;i<45;i++){
-   const id='PAGED-'+String(i).padStart(3,'0');f.shop.store.db.prepare('INSERT INTO orders VALUES (?,?,?,?,?,?)').run(id,legacySession,new Date(f.now()).toISOString(),1000,id,'{}');f.shop.store.put('orderMeta',id,{status:'refunded',lines:[]});
+    const id='PAGED-'+String(i).padStart(3,'0');f.shop.store.db.prepare('INSERT INTO orders (id,session_id,date,total,request_key,request_body) VALUES (?,?,?,?,?,?)').run(id,legacySession,new Date(f.now()).toISOString(),1000,id,'{}');f.shop.store.put('orderMeta',id,{status:'refunded',lines:[]});
   }
   let cursor=null,ids=[];do{const page=await owner('/api/orders?limit=7'+(cursor?'&cursor='+cursor:''));assert.equal(page.status,200);ids.push(...page.data.items.map(o=>o.id));cursor=page.data.nextCursor;}while(cursor);
   assert.equal(ids.length,46);assert.equal(new Set(ids).size,46);assert.equal((await owner(`/api/orders/${ids.at(-1)}`)).status,200);
