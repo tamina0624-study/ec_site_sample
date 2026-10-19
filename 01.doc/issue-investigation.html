@@ -1,0 +1,46 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>残課題の調査結果 | Slide Market</title><link rel="stylesheet" href="assets/documents.css"></head><body><header class="masthead"><div class="header-inner"><a class="brand" href="index.html">SLIDE MARKET <span>PROJECT DOCUMENTS</span></a><div class="header-actions"><a href="index.html">資料一覧</a><button type="button" onclick="window.print()">印刷・PDF保存</button></div></div></header><div class="page-heading"><p class="eyebrow">INVESTIGATION</p><h1>残課題の調査結果</h1><p class="meta">調査日：2026年10月19日</p></div><div class="layout"><aside class="toc" aria-label="目次"><a href="#summary">残件と優先度</a><a href="#build">ビルドの原因</a><a href="#browser">ブラウザテスト</a><a href="#docs">資料の再生成</a><a href="#external">外部設定</a><a href="#next">推奨する対応順</a></aside><main id="content">
+<div class="notice"><strong>調査結果：ビルドの原因を特定、ブラウザテストは12件成功・2件失敗</strong><p>2026年10月19日に調査。アプリの実装・依存関係・システムのNode.jsは変更していません。比較用のNode.jsとテストデータはGit管理外の <code>.tools/</code> に配置しました。</p></div>
+<article>
+<h2 id="summary">1. 残件と優先度</h2>
+<div class="table-scroll"><table><thead><tr><th>優先度</th><th>項目</th><th>調査結果</th><th>次の対応</th></tr></thead><tbody>
+<tr><td>高</td><td>ビルド異常終了</td><td>Node.js 24.11.1の非ASCIIパスに対するfs.rmSyncの不具合。24.13.1で削除テスト・通常ビルド2回が成功。</td><td>修正を含むNode.js 24系へ更新し、実行環境のPATHと必要バージョンを揃える。</td></tr>
+<tr><td>中</td><td>ブラウザテスト2件失敗</td><td>PC・モバイル各1件。/private/... の403期待に対しSPAのHTMLが200で返る。実ファイルの@fsアクセスは403。</td><td>保護対象URLの応答方針を決め、実ファイルの配信拒否を確認するテストと期待値を整える。</td></tr>
+<tr><td>中</td><td>HTML資料の再生成</td><td>Markdownは01.doc/assetsにあるが、build-docs.pyが01.doc直下から読むためFileNotFoundError。</td><td>原稿の参照先とHTML出力先を分ける。参照先をassetsへ合わせて再生成を検証する。</td></tr>
+<tr><td>中</td><td>調査用Viteの終了待ち</td><td>全テストの実行後と、単独のserver.close()で終了待ちを観測。専用プロセスを停止して結果を回収。</td><td>Viteの監視・接続・API終了処理を個別に追跡する。原因は未確定。</td></tr>
+<tr><td>準備待ち</td><td>実Google認証</td><td>必要な3変数が現在の実行環境にない。値そのものは読み出さず、設定の有無だけ確認。</td><td>OAuthクライアント・リダイレクトURI・テストユーザーを準備して実アカウント検証。</td></tr>
+<tr><td>準備待ち</td><td>実画像変換・ウイルス検査</td><td>scanner・office・rasterがすべてunavailable。現在のPATH・環境設定では利用不可。</td><td>ClamAVと定義、LibreOffice、Popplerを準備する。</td></tr>
+<tr><td>任意</td><td>独自検知語</td><td>個人名・会社名はユーザー固有の設定であり、未設定はアプリの不具合ではない。</td><td>必要時にローカルのkeywords.yamlへ設定。共有しない。</td></tr>
+</tbody></table></div>
+<h2 id="build">2. ビルドの原因と比較試験</h2>
+<p>実行環境はWindows、日本語を含むプロジェクトパス、Node.js 24.11.1、Vite 7.3.6。通常ビルドは型検査・32モジュールの変換後、終了コード <code>-1073740791 / 0xC0000409</code> で停止しました。</p>
+<ol><li>新しい出力先へのビルドは成功。</li><li>同じ出力先に再ビルドし、既存内容の削除が発生すると失敗。</li><li>最小のHTML＋JavaScriptだけの構成でも、2回目のビルドで再現。</li><li><code>emptyOutDir:false</code> にすると既存distへのビルドが成功。</li><li>ViteのemptyDirが使う <code>fs.rmSync()</code> を、専用の生成ファイル・ディレクトリで単独実行して同じ終了コードを再現。</li><li>Node.js 24.13.1へ実行時のPATHを切り替えると、単独削除と通常の <code>npm run build</code> が2回連続で成功。SEOファイルも6商品分生成。</li></ol>
+<p>これにより、Reactの実装・圧縮・Rollupのバイナリ自体を原因とする仮説よりも、古いNode.jsの削除処理が原因と判断できます。構成整理直後に成功していたことも、新規の出力先では削除が発生しない条件と整合します。</p>
+<p><a href="https://nodejs.org/en/blog/release/v24.13.1">Node.js 24.13.1の公式リリース</a>には非ASCII文字のrmSync修正が掲載されています。<a href="https://github.com/nodejs/node/issues/58759">公式Issue #58759</a>にも同じ終了コードの報告があります。</p>
+<p>比較用ランタイムは公式ZIPを取得し、公式SHASUMS256.txtとSHA-256を照合しました。システムのNode.jsは24.11.1のままなので、通常のシェルでのビルド失敗は環境更新まで残ります。初回の比較でnpm.cmdだけを直接指定しても、子コマンドが元のNode.jsを使うことを確認しました。PATHも切り替える必要があります。</p>
+<pre><code># この調査環境に配置した比較用Node.jsで実行する例（PowerShell）
+$env:PATH = (Join-Path $PWD '.tools/node-runtime/node-v24.13.1-win-x64') + ';' + $env:PATH
+node --version
+npm run build</code></pre>
+<p>恒久対策は修正済みのNode.js 24系を利用することです。削除を無効にする回避策は古い成果物を残すため、恒久設定としては採用しません。比較用24.13.1は修正確認用であり、最新バージョンの指定ではありません。</p>
+<h2 id="browser">3. ブラウザテストとファイル配信の確認</h2>
+<p>Node.js 24.13.1と既存のMicrosoft Edgeで、PC・モバイル計14件を実行。結果は12件成功・2件失敗です。普段のDB・固定ファイル版に影響しないよう、DB・配布ファイル・バックアップをすべて専用領域へ切り替えました。</p>
+<div class="table-scroll"><table><thead><tr><th>要求先</th><th>実際の応答</th><th>確認内容</th></tr></thead><tbody>
+<tr><td>/private/downloads/proposal.pptx</td><td>200 / text/html</td><td>React用HTML。ZIP／PPTXでもSQLiteでもない。</td></tr>
+<tr><td>/@fs/実ファイルの絶対パス（PPTX）</td><td>403</td><td>配信拒否。</td></tr>
+<tr><td>/@fs/実ファイルの絶対パス（DB）</td><td>403</td><td>配信拒否。</td></tr>
+<tr><td>/@fs/実ファイルの絶対パス（server/shop.mjs）</td><td>403</td><td>配信拒否。</td></tr>
+</tbody></table></div>
+<p>失敗箇所は <code>02.src/tests/api.spec.ts:20</code> のステータス検証です。Viteのルートを02.srcへ変更したため、/private/...は実ファイルの場所と対応せず、SPAフォールバックへ到達します。この試験では非公開ファイルの流出は確認されませんでした。失敗した2ケースは途中で止まるため、その後のアサーションは今回実行できていません。</p>
+<p>実ファイルを指定した拒否検証を加え、/private/...自体を403にするか、HTMLフォールバックを許容するかを決めるのが対応案です。403だけを200へ置き換えて済ませると、配信保護の検証が弱くなります。</p>
+<p>通常のPlaywright設定にはWindowsで扱いづらい <code>/tmp/...</code> のDB保存先と、固定ファイル版の既存保存先を使う設定が残っています。次の修正時は <code>os.tmpdir()</code> を使い、DBと配布ファイルの両方をテスト専用にするのが適切です。</p>
+<p>14ケースの終了後、Viteの終了待ちが継続しました。単独ルート検査の <code>server.close()</code> でも観測したため、原因を特定せず別の残件としています。今回起動した専用Vite・npmプロセスのみ停止し、最終結果を回収しました。3分という実行時間には終了待ちと回収待ちが含まれ、画面操作の性能測定ではありません。</p>
+<h2 id="docs">4. 資料の再生成で見つかった問題</h2>
+<p><code>python 02.src/scripts/build-docs.py</code> は最初の <code>01.doc/local-basic-design.md</code> 読み込みで失敗します。実際の原稿は <code>01.doc/assets/local-basic-design.md</code> です。ほかのMarkdown原稿も同じassets配下にあります。</p>
+<p>スクリプトの読み込み先をassetsへ合わせ、出力は01.docに維持する修正が必要です。既存HTMLの閲覧は可能です。再生成試験は最初の原稿読み込みで停止しており、HTMLは変更していません。残課題ファイルにあったimplementation-status.mdへの参照も、現在のHTMLへ直しました。</p>
+<h2 id="external">5. 外部設定・未実装事項</h2>
+<ul><li>Google設定：GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET、GOOGLE_REDIRECT_URIの3変数が未設定。実Google認証の不具合は、この状態では確認できません。</li><li>実ツール：npm run tools:checkはscanner・office・rasterをすべてunavailableと報告。現在の実行環境での未導入またはパス未設定であり、画像変換やClamAVそのものの動作不良とは判定していません。</li><li>独自検知語：個人名・会社名などは運用者が必要な場合だけ指定する設定です。</li><li>実販売：実決済・Webhook・外部メール・本番DB／ストレージ／監視などは既存資料に記載された未実装機能です。今回の調査でこれらを実装済みとは扱っていません。</li></ul>
+<h2 id="next">6. 推奨する対応順</h2>
+<ol><li>Node.jsの実行環境を更新し、必要な最低版をREADME・package.json等へ明示する。</li><li>配信拒否の仕様とAPIテストの期待値を整え、停止したケースも最後まで再実行する。</li><li>資料原稿の参照先を修正し、再生成・リンク・表示を確認する。</li><li>Vite終了待ちとテスト用ファイル保存先の隔離を修正・検証する。</li><li>必要な場合に外部ツールとGoogle設定を準備して実環境検証する。</li></ol>
+<p>本調査では原因確認と結果の記録まで実施しました。アプリ実装・依存関係・テスト本体の修正、システムNode.jsの更新、コミット・pushは行っていません。</p>
+</article>
+<footer><a href="index.html">資料一覧へ戻る</a> · <a href="../README.md">README</a></footer></main></div></body></html>

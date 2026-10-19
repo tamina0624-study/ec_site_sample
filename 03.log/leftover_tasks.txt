@@ -1,5 +1,17 @@
 更新日: 2026-10-19
+詳細: 01.doc/issue-investigation.html
 
-- ビルドのWindows異常終了（0xC0000409）を調査する。依存関係復元後も再現。構成整理時の成功記録と最新の失敗記録はcurrent_status.txt参照。
-- 個人名・会社名などの独自検知語は未設定。必要な場合のみGitSecurityTool/GitSecurityTool/keywords.yamlをローカル編集する。Git除外は設定済み。
-- ブラウザテスト、実Google認証、実変換ツールのテストは今回未実施。既存の機能上の残課題は01.doc/implementation-status.md参照。
+【原因特定・対応待ち】
+- ビルド異常はNode.js 24.11.1の日本語パスに対するfs.rmSync不具合。比較用24.13.1で削除・通常ビルド2回成功。システムNode.jsの更新と最低版の明示が必要。
+- PC・モバイルのAPIテスト各1件が/private/...の403期待で失敗。実際はSPAのHTMLが200。実ファイルへの@fsアクセスは403で、今回の検証では非公開ファイルの流出なし。配信拒否仕様とテストを整える。後続アサーションは未実行。
+- build-docs.pyの原稿読み込み先が01.doc直下のままで、実際の01.doc/assetsと不一致。再生成に失敗するため参照先を修正する。
+
+【追加調査】
+- テスト後・単独server.close()でViteの終了待ちを観測。監視・接続・API終了処理を調べる。専用プロセスは停止済み。
+- 通常のPlaywright設定をWindowsの一時パスに対応させ、DBと固定ファイル版を両方とも隔離する。
+
+【外部準備待ち・任意】
+- 実Google認証: 3環境変数が未設定。OAuthクライアント等を準備して検証する。
+- 実変換・検査: 現在の設定ではLibreOffice・Poppler・ClamAVが利用不可。導入・パス・定義を準備する。
+- 独自の検知語は必要時のみローカル設定する。
+- 実販売の未実装事項は01.doc/implementation-status.html参照。
