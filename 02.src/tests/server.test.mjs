@@ -29,12 +29,12 @@ test('期限・再起動・通知再試行・バックアップ復元・回数�
   assert.equal((await (await request('/api/admin/notifications')).json())[0].status,'failed');
   await request(`/api/admin/notifications/${notice.id}/retry`,'POST',{});await request('/api/admin/notifications/run','POST',{});assert.equal((await (await request('/api/admin/notifications')).json())[0].status,'saved');
   const env={...process.env,SHOP_DATA_DIR:dataDir,SHOP_FILE_DIR:fileDir,SHOP_BACKUP_DIR:backups};
-  execFileSync(process.execPath,['scripts/local-data.mjs','backup'],{env});const backupName=readdirSync(backups)[0];
-  assert.throws(()=>execFileSync(process.execPath,['scripts/local-data.mjs','restore',backupName],{env,stdio:'pipe'}));
+  execFileSync(process.execPath,['02.src/scripts/local-data.mjs','backup'],{env});const backupName=readdirSync(backups)[0];
+  assert.throws(()=>execFileSync(process.execPath,['02.src/scripts/local-data.mjs','restore',backupName],{env,stdio:'pipe'}));
   await stop();await start(); // Cookieと注文が再起動後も保持される。
   csrf=(await (await request('/api/session')).json()).csrf;assert.equal((await (await request('/api/orders')).json()).items[0].id,o.id);
   await request('/api/admin/reauth','POST',{password});await request(`/api/admin/orders/${o.id}/refund`,'POST',{reason:'復元テスト'});assert.equal((await (await request('/api/orders')).json()).items[0].status,'refunded');
-  await stop();execFileSync(process.execPath,['scripts/local-data.mjs','restore',backupName],{env});await start();csrf=(await (await request('/api/session')).json()).csrf;
+  await stop();execFileSync(process.execPath,['02.src/scripts/local-data.mjs','restore',backupName],{env});await start();csrf=(await (await request('/api/session')).json()).csrf;
   assert.equal((await (await request('/api/orders')).json()).items[0].status,'paid');
   const lastLink=await (await request(`/api/orders/${o.id}/download-links/proposal`,'POST',{})).json();assert.equal((await request(lastLink.url)).status,200);
   for(let i=0;i<5;i++)assert.equal((await request('/api/inquiries','POST',{email:'test@example.test',category:'other',body:'test'})).status,201);
@@ -142,7 +142,7 @@ test('自動バックアップ・保持数・手動保存の保持・失敗後�
  try{
   await f.shop.maintenance();assert.equal(f.shop.store.get('maintenance','backup').status,'ok');
   const firstCount=readdirSync(f.backupsDir).length;await f.shop.maintenance();assert.equal(readdirSync(f.backupsDir).length,firstCount);
-  const env={...process.env,SHOP_DATA_DIR:f.dataDir,SHOP_FILE_DIR:f.fileDir,SHOP_BACKUP_DIR:f.backupsDir};execFileSync(process.execPath,['scripts/local-data.mjs','backup'],{env});
+  const env={...process.env,SHOP_DATA_DIR:f.dataDir,SHOP_FILE_DIR:f.fileDir,SHOP_BACKUP_DIR:f.backupsDir};execFileSync(process.execPath,['02.src/scripts/local-data.mjs','backup'],{env});
   for(let i=0;i<3;i++){f.advance(1001);await f.shop.maintenance();}
   assert.equal(readdirSync(f.backupsDir).filter(n=>n.startsWith('auto-')).length,2);assert.equal(readdirSync(f.backupsDir).filter(n=>n.startsWith('backup-')).length,1);
   const original=resolve(f.fileDir,'versions',readdirSync(resolve(f.fileDir,'versions'))[0]);const {writeFileSync}=await import('node:fs');const originalBytes=readFileSync(original);writeFileSync(original,'corrupt');f.advance(1001);await f.shop.maintenance();assert.equal(f.shop.store.get('maintenance','backup').status,'failed');writeFileSync(original,originalBytes);f.advance(1001);await f.shop.maintenance();assert.equal(f.shop.store.get('maintenance','backup').status,'ok');
@@ -155,16 +155,16 @@ test('模擬領収書の所有者限定・返金表示・購入時保存と復�
   const owner=await f.client(),other=await f.client();const q=(await owner('/api/quotes','POST',{items:['proposal']})).data;const o=(await owner('/api/orders','POST',{quoteId:q.id,result:'success',accepted:true,termsVersion:q.terms},'receipt-order')).data;
   assert.equal(o.receiptSnapshot.total,1200);assert.equal(o.receiptSnapshot.tax,109);assert.equal((await other(`/api/orders/${o.id}/receipt`)).status,404);
   const receipt=await owner(`/api/orders/${o.id}/receipt`);assert.equal(receipt.status,200);assert.match(receipt.data,/実入金なし/);assert.equal((await owner(`/api/orders/${o.id}/receipt?download=1`)).status,200);
-  const env={...process.env,SHOP_DATA_DIR:f.dataDir,SHOP_FILE_DIR:f.fileDir,SHOP_BACKUP_DIR:f.backupsDir};execFileSync(process.execPath,['scripts/local-data.mjs','backup'],{env});const name=readdirSync(f.backupsDir)[0];
-  execFileSync(process.execPath,['scripts/local-data.mjs','backup-check',name],{env});execFileSync(process.execPath,['scripts/local-data.mjs','restore-drill',name],{env});assert.equal((await owner(`/api/orders/${o.id}`)).data.status,'paid');
+  const env={...process.env,SHOP_DATA_DIR:f.dataDir,SHOP_FILE_DIR:f.fileDir,SHOP_BACKUP_DIR:f.backupsDir};execFileSync(process.execPath,['02.src/scripts/local-data.mjs','backup'],{env});const name=readdirSync(f.backupsDir)[0];
+  execFileSync(process.execPath,['02.src/scripts/local-data.mjs','backup-check',name],{env});execFileSync(process.execPath,['02.src/scripts/local-data.mjs','restore-drill',name],{env});assert.equal((await owner(`/api/orders/${o.id}`)).data.status,'paid');
   await owner('/api/admin/login','POST',{password:f.password('admin')});await owner('/api/admin/reauth','POST',{password:f.password('admin')});await owner(`/api/admin/orders/${o.id}/refund`,'POST',{reason:'領収書検証'});assert.match((await owner(`/api/orders/${o.id}/receipt`)).data,/全額模擬返金済み/);
-  const {writeFileSync}=await import('node:fs');writeFileSync(resolve(f.backupsDir,name,'shop.sqlite'),'corrupted');assert.throws(()=>execFileSync(process.execPath,['scripts/local-data.mjs','restore-drill',name],{env,stdio:'pipe'}));assert.equal((await owner(`/api/orders/${o.id}`)).data.status,'refunded');
+  const {writeFileSync}=await import('node:fs');writeFileSync(resolve(f.backupsDir,name,'shop.sqlite'),'corrupted');assert.throws(()=>execFileSync(process.execPath,['02.src/scripts/local-data.mjs','restore-drill',name],{env,stdio:'pipe'}));assert.equal((await owner(`/api/orders/${o.id}`)).data.status,'refunded');
  }finally{await f.close();}
 });
 
 test('検査必須モードでは未検査ファイルを販売せず、既存ファイルの検出結果も記録する',async()=>{
  const assets={mode:'required',scanner:'/missing/clamscan',database:'',office:'/missing/libreoffice',raster:'/missing/pdftoppm'};const f=await localFixture({assets});try{
-  const {writeFileSync}=await import('node:fs');assets.scanner=resolve(f.root,'scanner.mjs');writeFileSync(assets.scanner,`#!${process.execPath}\nprocess.exit(1);`,{mode:0o700});
+  const {writeFileSync}=await import('node:fs');const scanner=resolve(f.root,'scanner.mjs');assets.scanner=[process.execPath,scanner];writeFileSync(scanner,`process.exit(1);`,{mode:0o700});
   const send=await f.client();assert.equal((await send('/api/quotes','POST',{items:['proposal']})).data.code,'SCAN_REQUIRED');await send('/api/admin/login','POST',{password:f.password('admin')});
   const p=(await send('/api/admin/products')).data.find(p=>p.id==='proposal');const result=await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision});assert.equal(result.status,400);assert.equal(result.data.code,'MALWARE_DETECTED');assert.equal(f.shop.store.get('versions',p.version).scan.status,'infected');assert.equal(f.shop.store.get('products',p.id).revision,p.revision);assert.equal((await send('/api/quotes','POST',{items:['proposal']})).data.code,'FILE_REJECTED');assert.equal((await send('/api/products/proposal/previews/0')).status,404);assets.mode='off';assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).data.code,'SCAN_REQUIRED');assert.equal(f.shop.store.get('versions',p.version).scan.status,'infected');
  }finally{await f.close();}
@@ -172,7 +172,7 @@ test('検査必須モードでは未検査ファイルを販売せず、既存�
 
 test('ファイル処理中は競合を返し、完了後も古いrevisionの更新を拒否する',async()=>{
  const assets={mode:'required',scanner:'/missing/clamscan',database:'',office:'/missing/libreoffice',raster:'/missing/pdftoppm'};const f=await localFixture({assets});try{
-  const {writeFileSync}=await import('node:fs');assets.scanner=resolve(f.root,'scanner.mjs');writeFileSync(assets.scanner,`#!${process.execPath}\nawait new Promise(r=>setTimeout(r,200));process.exit(0);`,{mode:0o700});
+  const {writeFileSync}=await import('node:fs');const scanner=resolve(f.root,'scanner.mjs');assets.scanner=[process.execPath,scanner];writeFileSync(scanner,`await new Promise(r=>setTimeout(r,200));process.exit(0);`,{mode:0o700});
   const send=await f.client();await send('/api/admin/login','POST',{password:f.password('admin')});const p=(await send('/api/admin/products')).data.find(p=>p.id==='proposal');
   const first=send('/api/admin/products/proposal/prepare','POST',{revision:p.revision});let busy=false;for(let i=0;i<20;i++){busy=(await send('/api/admin/health')).data.assets.busy;if(busy)break;}assert.equal(busy,true);
   assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).data.code,'ASSET_BUSY');assert.equal((await first).status,200);assert.equal((await send('/api/admin/products/proposal/prepare','POST',{revision:p.revision})).status,409);

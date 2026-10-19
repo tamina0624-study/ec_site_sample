@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createShop } from './server/shop.mjs';
-export default defineConfig({server:{fs:{deny:['**/private/**','**/data/**','**/backups/**','**/server/**','**/scripts/local-data.mjs','.env','.env.*','*.{crt,pem}','**/.git/**']}},plugins:[{
+import { createShop } from './02.src/server/shop.mjs';
+export default defineConfig({root:'02.src',envDir:'..',build:{outDir:'../dist',emptyOutDir:true},server:{fs:{deny:['**/00.secret/**','**/01.doc/**','**/03.log/**','**/GitSecurityTool/**','**/private/**','**/data/**','**/backups/**','**/server/**','**/scripts/local-data.mjs','.env','.env.*','*.{crt,pem}','**/.git/**']}},plugins:[{
  name:'local-shop-api',
  configureServer(server){const shop=createShop();server.middlewares.use(shop.handle);server.httpServer?.once('close',shop.close);},
  configurePreviewServer(server){

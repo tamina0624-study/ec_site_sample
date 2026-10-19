@@ -196,7 +196,7 @@
 | --- | --- | --- |
 | Baymard Institute | https://baymard.com/blog/current-state-of-checkout-ux | チェックアウトUXの研究と改善観点 |
 | Stripe公式ドキュメント | https://docs.stripe.com/payments/checkout | ホスト型決済、注文との連携、Webhook、対応する決済方法 |
-| Shopify公式開発者ドキュメント | https://shopify.dev/docs/storefronts/headless | ヘッドレス構成、Storefront API、チェックアウトの分担 |
+| Shopify公式開発者ドキュメント | https://shopify.dev/01.doc/storefronts/headless | ヘッドレス構成、Storefront API、チェックアウトの分担 |
 | 消費者庁・特定商取引法ガイド | https://www.no-trouble.caa.go.jp/what/mailorder/ | 通信販売の表示、返品条件、最終確認画面 |
 | PCI Security Standards Council | https://www.pcisecuritystandards.org/merchants/ | 決済情報の取り扱いと、採用構成に応じた加盟店の対応範囲 |
 

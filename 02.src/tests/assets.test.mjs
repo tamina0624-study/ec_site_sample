@@ -8,7 +8,7 @@ import {prepareAsset,scanFile,assetConfig} from '../server/assets.mjs';
 import {hash,inspectPptx} from '../server/storage.mjs';
 import {receiptSnapshot,receiptHtml} from '../server/receipts.mjs';
 
-function fakeCommand(root,name,source){const path=resolve(root,name);writeFileSync(path,`#!${process.execPath}\n${source}`,{mode:0o700});return path;}
+function fakeCommand(root,name,source){const path=resolve(root,name);writeFileSync(path,source);return [process.execPath,path];}
 const absent=resolve(tmpdir(),'slide-market-tool-does-not-exist');
 
 test('変換キャッシュとClamAV検査：正常・未導入・失敗・問題検出',async()=>{

@@ -1,236 +1,402 @@
 # Slide Market
 
-PowerPoint資料のダウンロード販売を体験する学習用デモ。React / TypeScript / Viteで実装しています。実際の販売・請求は行いません。
+PowerPoint資料の検索から模擬購入、ダウンロード、店舗運営までを体験する学習用ECデモです。実際の請求・返金・メール配信は行いません。
 
-## 現在の実装：サービス登録不要のローカル運用
+## 2. 利用者の困りごとと、このツールでの解決方法
 
-Node.js・SQLite・ローカルファイルだけで、購入と運営の処理を確認できます。Googleログインは任意で設定でき、未設定の場合は従来どおり匿名のブラウザセッションで利用できます。実際の請求・返金・メール送信は行いません。
-
-### 起動と管理画面
-
-Node.js 24を使用してください。
-
-```sh
-npm ci --cache /tmp/slide-market-npm-cache
-npm run dev
-```
-
-- 店舗：`http://localhost:5173/`、管理画面：`http://localhost:5173/#admin`。
-- 初回起動で `data/admin-password.txt`（運営管理者）と `data/editor-password.txt`（商品管理者）を生成します。ローカルで該当ファイルを開き、ログイン画面へ入力してください。
-- 運営管理者は全機能、商品管理者は商品の編集・ファイル登録と自身の認証設定を操作できます。管理ログインは1時間、購入者用のブラウザセッションは30日で失効します。
-- パスワードが不明な場合はサーバー停止後に `npm run admin:reset` で再発行します。既存管理セッションの権限とMFA設定も解除します。
-- `npm run build` → `npm run preview` でも画面とAPIを起動できます。静的ホスティングだけではAPIは動きません。
-
-### Googleログイン（任意）
-
-Google CloudでOAuthクライアント（ウェブアプリケーション）を作成し、承認済みのリダイレクトURIに `http://localhost:5173/api/auth/google/callback` を登録します。OAuth同意画面がテスト中の場合は、利用するGoogleアカウントをテストユーザーに追加してください。次の環境変数を設定してから開発サーバーを起動します。
-
-```sh
-export GOOGLE_CLIENT_ID='GoogleのクライアントID'
-export GOOGLE_CLIENT_SECRET='Googleのクライアントシークレット'
-export GOOGLE_REDIRECT_URI='http://localhost:5173/api/auth/google/callback'
-npm run dev
-```
-
-本番環境ではHTTPSの公開URLをGoogle Cloudと `GOOGLE_REDIRECT_URI` の両方に登録し、`SHOP_COOKIE_SECURE=true` を設定してください。シークレットはソース管理へ追加せず、実行環境のSecret設定で管理します。認証にはOIDCのstate・nonce・PKCEを使い、Googleが検証したメールアドレスと一意なアカウントIDを保存します。初回ログイン時に同じブラウザの既存注文とお気に入りをアカウントへ引き継ぎます。ログイン後は同じGoogleアカウントでログインした端末から履歴を共有できます。Google設定がない場合、店舗にログイン操作は表示されません。
-
-### 実装済みの機能
-
-| 機能 | 現在の動作 |
+| 想定される困りごと | このツールでできること |
 | --- | --- |
-| 商品管理 | 商品の新規登録・編集・下書き・公開・販売停止、更新競合の検出、セット商品登録 |
-| PPTX管理 | 50MB以下のPPTXを構造検査。ClamAV接続・検査必須モード。問題検出した版の公開・購入・取得を停止 |
-| 商品情報 | サイズ・ページ数・対応ソフト。LibreOffice＋Popplerで最大12ページの画像生成。未導入・失敗時は文字抜粋 |
-| 購入確認 | サーバーで計算する10分有効の見積もり、価格・商品変更時の再確認、規約同意とバージョンの記録 |
-| 注文 | 模擬決済、操作キーの重複防止、購入済み資料の再購入防止・再取得案内、購入時の商品・ファイル版・規約本文の保存 |
-| 購入者ログイン | 任意のGoogle OIDCログイン、匿名注文・お気に入りの引継ぎ、アカウント単位の端末間共有 |
-| ダウンロード | Cookieのブラウザセッションと購入権限を確認。リンクは5分有効・発行元セッション専用。ログイン済みなら別端末で再発行可能 |
-| 模擬領収書 | 購入時の商品・セット価格・割引・合計・仮の10%税額を保存し、HTML表示・保存・印刷。返金状態も表示 |
-| 注文管理・返金 | 注文番号・商品名・状態で検索。理由付き全額模擬返金で権限と発行済みリンクを停止 |
-| 問い合わせ | フォームからSQLiteに保存し、管理画面で未対応・対応中・完了を更新 |
-| 通知 | 購入・返金・問い合わせの通知内容をローカル保存。外部配信なし。5秒周期、失敗時の再試行と手動再処理 |
-| 利便性 | 価格・新着順、匿名時はブラウザ単位・ログイン時はアカウント単位のお気に入り、期限・回数上限付きクーポン、セット販売 |
-| 販売条件 | 利用規約・利用許諾、プライバシー、返金条件、特商法表記の準備用ページ |
-| セキュリティ | Cookie・CSRF・役割・回数制限、任意のTOTP MFAと復旧コード、返金時の5分有効の再認証、操作履歴 |
-| 運用・分析 | DB・通知の状況表示、日別の購入経路イベント集計、手動／自動バックアップ・保持件数・整合性検査・復元 |
-| SEO | 商品別URL `/products/商品ID`。ビルドで商品ごとのメタ情報・構造化データ・サイトマップを生成 |
+| 資料販売の購入フローを、決済サービスへ登録する前に試したい | 商品検索、カート、見積もり、規約同意、成功・失敗を選べる模擬決済、注文履歴をローカルで確認できます。 |
+| 資料の内容を確認してから選びたい | 商品説明、ページ数、対応ソフト、画像または文字抜粋のプレビューを確認できます。 |
+| 購入した資料を再取得したい | 注文履歴から購入時のファイル版を取得できます。任意のGoogleログインを設定すると、同一アカウントの別端末でも履歴を参照できます。 |
+| 購入していない人へのファイル配信を防ぐ仕組みを学びたい | APIで注文の所有者・状態・期限を照合し、発行元セッション専用の短期リンクで配信する動作を確認できます。 |
+| 商品・問い合わせ・返金・バックアップをまとめて試したい | 管理画面と運用コマンドで、商品公開、PPTX登録、問い合わせ対応、全額模擬返金、バックアップ・復元を操作できます。 |
 
-購入確認で規約と返金条件へ同意してから模擬決済を確定します。管理画面のクーポンは大文字コードで登録します。セットと単品で同じ資料が重複する注文は拒否します。クーポンの利用回数は返金後も戻しません。
+## 3. アプリケーション概要
 
-通知の状態は `pending`（予定）→ `saved`（ローカル保存完了）。失敗は指数バックオフで最大8回再試行し、`failed` にします。管理画面から失敗の模擬と再処理を実行できます。送信先アドレスの認証や外部メール配信はありません。
+デジタル資料の販売を検討している人、ECの購入・運営フローや権限管理を学ぶ開発者向けです。Node.js・SQLite・ローカルファイルで動作し、基本機能の利用に外部サービスのアカウントは不要です。
 
-### 管理者の認証設定
+購入者側の画面と運営側の管理画面を備えています。Google認証と無料の変換・検査ツールは任意の追加設定です。現在のローカル実装と、将来の実販売向け設計は区別しています。
 
-管理画面の「認証設定」から、運営管理者・商品管理者それぞれに任意のTOTP MFAを設定できます。パスワードで開始し、オフライン対応の認証アプリへ秘密情報を登録して6桁コードで確定します。復旧コード8個は一度だけ表示され、各1回だけ使用できます。使用済みTOTPコードの再利用も拒否します。
+## 4. 主な機能
 
-ローカル確認用に `npm run admin:otp`（商品管理者は `npm run admin:otp -- editor`）でコードを生成できます。ただしDBと同じ端末で生成する方法は、独立した第二要素にはなりません。秘密情報・復旧コードはGitへ保存しないでください。紛失時はサーバー停止後の `npm run admin:reset` でパスワードとMFAを再設定します。
+| 機能 | 利用者ができること・現在の動作 |
+| --- | --- |
+| 商品を探す | 検索、価格・新着順の並び替え、お気に入り、セット商品の選択。 |
+| 商品を確認する | 説明・サイズ・ページ数・対応ソフトを確認。画像プレビューは最大12ページ、変換できない場合は文字抜粋。 |
+| 模擬購入する | 10分有効のサーバー計算見積もり、クーポン、規約・返金条件への同意。価格変更・購入済み資料・セット内の重複を確認。 |
+| 購入履歴から取得する | 購入時のファイル版を取得。リンクは5分有効で、発行したブラウザセッション専用。返金後は使用不可。 |
+| アカウントで共有する | 任意のGoogle OIDCログイン。同じブラウザの匿名注文・お気に入りを引き継ぎ、別セッションで履歴を共有。実Google認証は未検証。 |
+| 模擬領収書を確認する | 購入時の商品・割引・合計と、仮の税込10%モデルの税額をHTML表示・保存・印刷。実入金の証明や適格請求書には使用不可。 |
+| 商品を管理する | 商品の新規登録・編集・下書き・公開・販売停止、セット販売、更新競合の検出、50MB以下のPPTX登録。 |
+| ファイルを検査する | PPTX構造検査、任意のClamAV検査、LibreOffice＋Popplerによる画像生成。検査必須モードでは未検査ファイルの公開・新規購入を拒否。 |
+| 注文・問い合わせへ対応する | 注文検索、理由付き全額模擬返金、問い合わせの保存・対応状態更新。返金時は購入権限と発行済みリンクを停止。 |
+| 通知を確認する | 購入・返金・問い合わせの通知をローカル保存。5秒周期で処理し、失敗時は最大8回再試行。外部メールは送信しない。 |
+| 管理者を保護する | 運営管理者・商品管理者の権限分離、CSRF、回数制限、任意のTOTP MFA・復旧コード、返金前の5分有効の再認証、操作履歴。 |
+| 運用状況を確認する | DB・通知の状態、日別イベント件数、手動／自動バックアップ、整合性検査、復元演習。自動バックアップは既定で24時間ごと・直近7件保持。 |
+| 商品ページを生成する | 商品別URL、ビルド時のメタ情報・構造化データ・サイトマップ生成。 |
 
-模擬返金前にパスワードを再入力します。MFA設定済みなら未使用のコードまたは復旧コードも必要です。APIの再認証は5分有効です。
+## 5. 画面・利用イメージ
 
-### 画像プレビュー・ファイル検査・模擬領収書
+掲載用のアプリ画面スクリーンショットは現在ありません。代表的な操作は次のとおりです。
 
-無料のLibreOffice Impress・Poppler・ClamAVを導入すると、管理画面で「画像プレビュー生成・ウイルス検査」を実行できます。新しいPPTXの登録でも同じ処理を行います。画像変換は未導入・失敗時に文字抜粋へ戻します。ClamAVは未導入を未検査と記録し、定義不足・検査失敗・問題検出では登録を拒否します。`SHOP_SCAN_MODE=required` で未検査商品の公開・新規購入も拒否します。
-
-```sh
-npm run tools:check
-# まとめて準備する場合はサーバー停止後
-npm run assets:prepare
+```mermaid
+flowchart LR
+    A[商品一覧・検索] --> B[商品詳細・プレビュー]
+    B --> C[カート]
+    C --> D[見積もり・クーポン・規約同意]
+    D --> E[模擬決済]
+    E -->|成功| F[注文完了・履歴]
+    E -->|失敗| D
+    F --> G[資料取得・模擬領収書]
 ```
 
-新しい注文の詳細・履歴から模擬領収書を表示・HTML保存・印刷できます。割引後の模擬合計を仮の税込10%として税額を切り捨て計算します。実入金の証明や適格請求書には使えません。
+| 画面 | URL・表示先 | 主な操作 |
+| --- | --- | --- |
+| 店舗 | `http://localhost:5173/` | 一覧・検索・お気に入り |
+| 商品詳細 | `/products/商品ID` | 説明・プレビュー・カート追加 |
+| 購入確認 | `/#cart` → `/#checkout` | 見積もりと規約同意、模擬決済 |
+| 注文履歴 | `/#history` | 購入済み資料の再取得、模擬領収書 |
+| 問い合わせ | `/#contact` | 問い合わせ登録 |
+| 販売条件 | `/#legal/種類` | 規約・許諾・返金条件など |
+| 管理画面 | `http://localhost:5173/#admin` | 商品・注文・問い合わせ・通知・認証・運用 |
 
-ツール導入・環境変数・検査状態・税額の仮定は [ローカル運用手順](docs/local-operations.md) を参照してください。公式ウイルス定義の取得・更新には通信環境が必要ですが、アカウント登録は不要です。アプリから自動取得は行いません。
+管理画面には運営管理者と商品管理者のログインがあります。運営管理者は全機能、商品管理者は商品編集・ファイル登録と自身の認証設定を操作できます。
 
-### 保存先とファイルの更新
+## 6. 技術スタック
 
-- `data/shop.sqlite`：商品・見積もり・注文・問い合わせ・通知・お気に入り・監査履歴・Googleアカウントのsubject／メール／表示名。個人情報を含むためDBとバックアップを共有しないでください。
-- `private/downloads/`：初期サンプル。`npm run generate` で初期商品JSONから再生成します。
-- `private/downloads/versions/`：購入時ファイルをSHA-256で識別して保存。DBと一緒にバックアップしてください。
-- 商品JSONは初期データの取り込みに使用します。初回起動後の商品変更は管理画面で行い、PPTXはアップロードして更新します。
-- カートのみlocalStorageへ保存します。過去のlocalStorageのデモ注文から購入権限は発行しません。
-- リセットは現在の匿名ブラウザ注文と取得権限を削除します。Googleログイン中はアカウント注文を保持し、通知・問い合わせ・監査履歴も運営記録として残ります。
-- `data/`、`backups/`、生成済みファイル版はGit管理とViteの直接配信から除外しています。パスワードやDBを共有しないでください。
+| 分類 | 使用技術 | 用途 |
+| --- | --- | --- |
+| UI | React 19、TypeScript、CSS | 店舗・管理画面、APIの型定義 |
+| 開発・ビルド | Vite 7、TypeScript | 開発サーバー、型検査、フロントエンド生成 |
+| API | Node.js 24、JavaScript ES Modules | Viteの開発／プレビューへ接続するローカルAPI |
+| DB | Node.js組み込みの `node:sqlite`、SQLite | 商品・注文・認証・問い合わせ・運用情報 |
+| PPTX | JSZip、PptxGenJS | PPTXの構造検査、初期サンプル生成 |
+| 任意の認証 | openid-client 6、Google OIDC | 購入者ログイン、state・nonce・PKCEの検証 |
+| 任意のローカルツール | LibreOffice Impress、Poppler（pdftoppm）、ClamAV | 画像生成・ウイルス検査 |
+| テスト | Node.js Test Runner、Playwright | サーバー・ファイル処理・PC／モバイルの検証 |
+| コミット検査 | GitSecurityTool、pre-commit、gitleaks | 秘密情報・独自キーワード・基本形式の検査 |
 
-### バックアップと復元
+依存バージョンの定義は [package.json](package.json)、固定された依存関係は [package-lock.json](package-lock.json) を参照してください。
 
-```sh
-npm run backup
-npm run backup:list
-npm run backup:check -- backup-実際に作成された名前
-npm run restore:drill -- backup-実際に作成された名前
-# 開発・プレビューサーバーを停止してから実行
-npm run restore -- backup-実際に作成された名前
-```
-
-`backups/` にSQLiteの整合したスナップショット、購入時のファイル、チェックサム一覧を保存します。復元前にチェックサム・SQLite・外部キー・購入済みファイルを検証し、現在のデータも退避します。起動中のサーバーへの復元は拒否します。復元後は管理パスワードがバックアップ時点に戻るため、必要なら `npm run admin:reset` を実行してください。バックアップにも問い合わせ等が含まれるため、安全に保管してください。
-
-サーバー稼働中は起動後の最初の確認時と以後24時間ごとに自動バックアップを作り、直近7件を保持します。5秒周期で実行時刻を確認します。停止中は実行しません。`SHOP_BACKUP_INTERVAL_MS`（既定86400000、0で無効）と `SHOP_BACKUP_KEEP`（既定7、1〜365）で変更できます。自動分だけを削除し、手動バックアップは残します。失敗時は再試行し、管理画面の「運用・分析」で状態を確認できます。DBのMFA秘密情報もバックアップに含まれます。同じディスクのバックアップはディスク故障対策にはならないため、別媒体への保管は運営者が行います。
-
-検証・一時領域への復元演習は稼働中にも実行でき、普段のDBを変更しません。画像キャッシュはバックアップ対象外で、復元後に再生成できます。具体的な復元・確認・戻し方は [ローカル運用手順](docs/local-operations.md) に記載しています。
-
-### 検証
-
-```sh
-npm run build
-npm run test:server
-CHROMIUM_PATH=/usr/bin/chromium npm test
-```
-
-ブラウザテストは専用の一時DBとテスト用管理資格情報を使用し、普段のDBを変更しません。開発サーバーを停止してから実行してください。サーバーテストは期限切れ・再起動・通知再試行・バックアップ復元を確認します。
-
-### 既知の制約と本番向けに残る事項
-
-現状はローカル検証用です。Googleログインは任意設定で、未設定なら購入者はCookieで識別され、別端末への履歴共有はありません。模擬決済を誰でも成功させられるため、実入金の証明には使えません。実決済・Webhook・メール配信・本番ストレージ・外部障害通知は未実装です。ClamAVの定義準備・更新と変換プロセスのOS隔離は別途必要です。販売者情報、実販売の税区分・領収書、返金条件、個人情報の保存期間も販売開始前に確定します。
-
-検索エンジンへの登録は既定で禁止しています。商品メタ情報はビルド時点のDBを参照するため、商品変更後は再ビルドが必要です。外部サービスへ送らないイベント件数の集計は、ユニーク人数・厳密な転換率を示すものではありません。
-
-## ディレクトリ構成
-
-```text
-ec_site_sample/
-├── src/
-│   ├── main.tsx                 # 店舗画面・購入確認・履歴
-│   ├── LocalPages.tsx           # 管理・問い合わせ・販売条件の画面
-│   ├── AdminSecurity.tsx        # MFA設定・解除・復旧コード
-│   ├── api.ts                   # API接続・型・CSRFトークン管理
-│   ├── products.json            # 初期6商品の取り込み用データ
-│   └── style.css                # 店舗・管理画面・レスポンシブ対応
-├── server/
-│   ├── shop.mjs                 # API・価格計算・模擬決済・管理・通知
-│   ├── google-auth.mjs          # Google OIDC・state・nonce・PKCE検証
-│   ├── security.mjs             # TOTP・復旧コード
-│   ├── legal.mjs                # 販売条件本文・購入時スナップショット
-│   ├── pagination.mjs           # カーソルページング
-│   ├── assets.mjs               # ClamAV検査・PPTX→PDF→PNG変換
-│   ├── receipts.mjs             # 模擬領収書の購入時保存・印刷用HTML
-│   ├── backups.mjs              # バックアップ・自動分の保持
-│   └── storage.mjs              # SQLite・初期取り込み・PPTX検証
-├── private/downloads/
-│   ├── *.pptx                   # 初期6商品のサンプル
-│   └── versions/                # SHA-256で固定するファイル版（生成・Git除外）
-├── public/previews/             # 初期サンプルの表紙SVG（生成処理の出力）
-├── data/                        # SQLite・管理パスワード・起動PID（生成・Git除外）
-├── backups/                     # DB・ファイル版・チェックサム（生成・Git除外）
-├── scripts/
-│   ├── generate-slides.mjs      # 初期PPTXと表紙SVGの生成
-│   ├── generate-seo.mjs         # ビルド時の商品HTML・メタ情報・サイトマップ
-│   ├── prepare-assets.mjs       # 無料ツール確認・既存版の画像生成と検査
-│   └── local-data.mjs           # バックアップ・検証・復元演習・管理パスワード再発行
-├── tests/
-│   ├── shop.spec.ts             # 店舗のブラウザテスト
-│   ├── api.spec.ts              # 権限・見積もり・管理・返金などのAPIテスト
-│   ├── local.spec.ts            # 管理画面・問い合わせ・お気に入りなど
-│   ├── assets.test.mjs          # 変換・検査失敗・領収書計算
-│   ├── tools.test.mjs           # 無料ツールの実変換・検査（任意実行）
-│   └── server.test.mjs          # 期限・再起動・OIDC引継ぎ・通知再試行・復元
-├── docs/                        # 実装状況・基本設計・要件・設計パターン・初期履歴
-├── dist/                        # ビルド成果物（生成・Git除外）
-├── vite.config.mjs              # 開発／プレビューのAPI接続・非公開ファイル保護
-├── playwright.config.ts         # PC／モバイル・一時DB・テスト資格情報
-├── index.html
-├── package.json
-├── package-lock.json
-├── tsconfig.json
-├── .gitignore
-└── README.md
-```
-
-## アプリの仕組み
+## 7. システム構成
 
 ```mermaid
 flowchart TD
-    browser["React画面：店舗・管理・問い合わせ"]
-    cart["localStorage：カートのみ"]
-    api["Node.js API：Viteの開発／プレビューに接続"]
-    db["SQLite：商品・注文・見積もり・通知・管理記録"]
-    files["非公開ローカルファイル：private/downloads/versions"]
-    inbox["管理画面の通知一覧：外部配信なし"]
-    assets["無料ローカルツール：ClamAV検査・LibreOffice＋Poppler画像化"]
-    previews["data/previews：画像キャッシュ"]
-    receipt["模擬領収書：購入時データからHTML・印刷"]
-    seed["初期商品JSON・サンプルPPTX"]
-    backup["backups/：DBと固定ファイル版"]
-    browser <-->|保存・復元| cart
-    browser <-->|CookieとCSRFトークン| api
-    api <-->|サーバー価格計算・模擬購入・返金| db
-    api -->|ファイルを検査・変換| assets
-    assets -->|最大12ページ| previews
-    api -->|公開商品のプレビュー| previews
-    db -->|所有者を確認| receipt
-    receipt -->|表示・保存| browser
-    api -->|注文所有者・状態・期限を毎回確認| files
-    files -->|API経由のダウンロード| browser
-    db -->|5秒周期で通知をローカル保存| inbox
-    seed -->|初回取り込み| db
-    seed -->|SHA-256でファイル版を保存| files
-    db -->|手動・自動バックアップ| backup
-    files -->|手動・自動バックアップ| backup
+    UI[React画面：店舗・管理・問い合わせ]
+    CART[localStorage：カート]
+    API[Node.js API：Vite開発／プレビューに接続]
+    DB[(SQLite：data/shop.sqlite)]
+    FILES[非公開PPTX：private/downloads/versions]
+    TOOLS[任意：ClamAV・LibreOffice・Poppler]
+    IMAGE[data/previews：画像キャッシュ]
+    GOOGLE[任意：Google OIDC]
+    BACKUP[backups：DB・固定ファイル版]
+    UI <--> CART
+    UI <-->|Cookie・CSRF／JSON| API
+    API <--> DB
+    API -->|所有者・注文状態・期限の確認後に配信| FILES
+    API --> TOOLS
+    TOOLS --> IMAGE
+    API -->|公開商品のプレビュー| IMAGE
+    API <--> GOOGLE
+    DB --> BACKUP
+    FILES --> BACKUP
 ```
 
-商品詳細は `/products/商品ID`、他の画面は `#cart`、`#checkout`、`#order/注文ID`、`#history`、`#guide`、`#contact`、`#legal/種類`、`#admin` で切り替えます。旧形式 `#product/商品ID` も表示できます。
+1. 画面がAPIから公開商品を取得します。カートはブラウザ内に保存します。
+2. 購入確認でAPIが価格・クーポン・公開状態を確認し、10分有効の見積もりを保存します。
+3. 同意後の模擬購入で再検証し、注文・購入時の商品／ファイル版／販売条件・通知を同じDBトランザクションで記録します。
+4. ダウンロード要求時と実際の取得時に所有者・注文状態を確認します。トークンはDBへハッシュで保存し、5分の期限と発行元セッションも照合します。
+5. 通知はAPIプロセス内の周期処理でローカル保存状態へ更新します。外部配信サービスへの接続はありません。
 
-APIから公開商品の情報を取得し、購入確認で10分有効の見積もりを作ります。同意後の模擬購入では、単価・公開状態・商品版・クーポンをサーバーで再検証して注文と通知を同じトランザクションで保存します。成功時はカートを空にし、失敗時はカートを残します。表示価格は架空の円・税込価格で、実販売の税計算や正式な領収書発行はありません。新しい注文には仮の10%税込モデルの模擬領収書を作成します。
+Google設定がない場合は匿名のブラウザセッションで利用できます。Google設定時は認証後のアカウントに注文・お気に入りを関連付けます。
 
-ダウンロードは `POST /api/orders/注文ID/download-links/商品ID` でリンクを作り、`GET /api/downloads/トークン` で取得します。トークンはDBにハッシュで保存し、発行したブラウザセッション・注文状態・5分の期限を取得時にも確認します。匿名注文は同じブラウザに限定されます。Googleログイン済みなら別端末でログインしてリンクを再発行できます。これはストレージの署名付きURLではなく、ローカルAPIのトークン方式です。返金・リセット後は発行済みリンクも使用できません。取得済みファイルは回収できません。
+## 8. 構成のポイントと採用理由
 
-注文履歴・管理注文・操作履歴はカーソルで続きを表示します（APIは既定20件、最大100件／ページ）。古い注文も個別に取得できます。DBから古い注文を自動削除しません。購入済み判定は表示中の履歴件数に依存せず、返金・リセット後は再購入できます。購入時に同意した規約・返金条件の本文は注文に保存し、注文詳細で確認できます。
+以下は既存の説明資料と実装から確認できる方針・動作です。React・Vite・JSON文書方式を他の技術より優先した比較選定の経緯は、コード上では確認できません。
 
-APIのエラーはcode・message・requestIdを返します。画面のエラーに表示する確認番号と、管理画面のエラー記録を照合できます。初期SQLite版の既存デモ注文はファイル版を固定し、既存ブラウザCookieを引き継ぎます。localStorageだけに保存されていた初期静的デモ注文は移行しません。
+| 構成のポイント | 確認できる目的・利点 | トレードオフ・制約 |
+| --- | --- | --- |
+| Node.js・SQLite・ローカルファイルで完結 | 外部サービス登録前に購入・運営を試す学習用構成。DBサーバーの別途構築が不要。 | 現在は同一DBを利用するサーバーの多重起動を拒否。本番DB・複数台構成は未対応。 |
+| React画面とサーバーAPIを分離 | 画面から送られる価格を採用せず、APIが価格・所有者・権限を確認する。 | フロントエンドの静的ファイルだけでは購入・配信機能が動かない。 |
+| 購入時の版と条件を保存 | 商品更新後も購入時の資料・価格・規約を参照できる。PPTXはSHA-256単位で固定。 | DBと固定ファイル版の両方を保管・復元する必要がある。 |
+| Googleログインを任意にする | 未設定でも匿名購入を試せる。設定すると同一アカウントで端末間共有できる。 | 匿名注文は同じブラウザのCookieが必要。本人のメール確認は匿名セッションでは行わない。 |
+| プレビューと検査の状態を区別 | 画像変換ができなくても文字抜粋で商品を確認できる。検査必須モードでは未検査商品の販売を止める。 | 画像の代替表示はウイルス検査の代わりにはならない。変換結果はPowerPointと異なる場合がある。 |
+| ローカル通知・バックアップ | 外部サービスなしで再試行や復元を確認できる。 | 外部メール・監視は未実装。同じディスクのバックアップだけではディスク故障へ対応できない。 |
+| 関係テーブルとJSON文書を併用 | 注文・明細はSQLで関連付け、商品や購入時の補足情報は `documents` に保存する実装。 | JSON内の参照にはDBの外部キーがない。採用理由の比較記録は確認できない。 |
 
-## 確認済みの検証結果
+## 9. DB構造
 
-2026年10月9日時点で `npm run build` とサーバー・ファイル処理テスト11件が成功しています。Google OAuthはモックによるstate・nonce・PKCE受け渡しとアカウント所有権を確認しましたが、Google Cloud資格情報がないため実アカウント認証は未検証です。PlaywrightはChromiumのOS依存ライブラリ不足でブラウザケースを完了できていません。実ツール確認2件の内容と過去の検証記録、本番前の残作業は[実装状況と残作業](docs/implementation-status.md)を参照してください。
+現行スキーマは [storage.mjs](02.src/server/storage.mjs) の `openStore()` が定義します。通常の保存先は `data/shop.sqlite`。WALと外部キー検査を有効にしています。DBは初回起動時に作成され、現行コードでは不足する `account_id` 列の追加も行います。
 
-## 設計資料
+| テーブル | 用途・主要な列 | キー・制約 |
+| --- | --- | --- |
+| `accounts` | Googleアカウントの識別ID、メール、表示名、作成／更新日時 | `id` が主キー。`email` のUNIQUE制約はない。 |
+| `sessions` | ブラウザセッションの識別ID | `id` が主キー。 |
+| `local_sessions` | セッションの役割、期限、CSRF、任意のアカウントID | `id` は主キーかつ `sessions.id` への外部キー。`account_id` は `accounts.id` への任意の外部キー。 |
+| `orders` | 注文ID、セッション、日時、合計、操作キー・要求内容、任意のアカウントID | `id` が主キー。`session_id` → `sessions.id`、`account_id` → `accounts.id`。`(session_id, request_key)` がUNIQUE。 |
+| `items` | 購入時の商品ID・商品名・単価 | `(order_id, product_id)` が複合主キー。`order_id` → `orders.id`、注文削除時にCASCADE。 |
+| `documents` | 商品、ファイル版、見積もり、注文補足、管理認証、通知などのJSON | `(kind, id)` が複合主キー。`value` はJSON文字列を保存するTEXT列。 |
+| `favorites` | 匿名ブラウザのお気に入り | `(session_id, product_id)` が複合主キー。`session_id` → `sessions.id`。 |
+| `account_favorites` | ログイン済みアカウントのお気に入り | `(account_id, product_id)` が複合主キー。`account_id` → `accounts.id`、アカウント削除時にCASCADE。 |
+| `download_tokens` | トークンハッシュ、セッション・注文・商品ID、期限 | `token_hash` が主キー。関連IDにDBの外部キー制約はない。APIで所有権・注文状態を確認する。 |
+| `metrics` | 日別・イベント別の件数 | `(day, event)` が複合主キー。 |
+
+`orders(account_id, date DESC, id DESC)` に索引があります。主なDB上の関係は次のとおりです。
+
+```mermaid
+erDiagram
+    sessions ||--o| local_sessions : authenticates
+    accounts o|--o{ local_sessions : signs_in
+    sessions ||--o{ orders : creates
+    accounts o|--o{ orders : owns
+    orders ||--o{ items : contains
+    sessions ||--o{ favorites : saves
+    accounts ||--o{ account_favorites : saves
+    accounts {
+        TEXT id PK
+        TEXT email
+        TEXT name
+    }
+    sessions {
+        TEXT id PK
+    }
+    local_sessions {
+        TEXT id PK,FK
+        TEXT account_id FK
+        TEXT role
+        INTEGER expires
+    }
+    orders {
+        TEXT id PK
+        TEXT session_id FK
+        TEXT account_id FK
+        TEXT request_key
+        INTEGER total
+    }
+    items {
+        TEXT order_id PK,FK
+        TEXT product_id PK
+        TEXT name
+        INTEGER price
+    }
+    favorites {
+        TEXT session_id PK,FK
+        TEXT product_id PK
+    }
+    account_favorites {
+        TEXT account_id PK,FK
+        TEXT product_id PK
+    }
+    documents {
+        TEXT kind PK
+        TEXT id PK
+        TEXT value
+    }
+    download_tokens {
+        TEXT token_hash PK
+        TEXT session_id
+        TEXT order_id
+        TEXT product_id
+        INTEGER expires
+    }
+    metrics {
+        TEXT day PK
+        TEXT event PK
+        INTEGER count
+    }
+```
+
+`product_id` は `documents(kind='products')` の商品を指す論理参照で、商品テーブルへの外部キーではありません。`documents` の主な `kind` は、`products`、`versions`、`quotes`、`orderMeta`、`credentials`、`coupons`、`inquiries`、`notifications`、`audit`、`errors`、`maintenance` です。
+
+注文状態（`paid`・`refunded`）、購入時の明細版・規約・模擬領収書などは `orderMeta` のJSONに保存します。通知状態は `pending`・`saved`・`failed`。商品状態などもJSON内で管理し、SQLのENUMやCHECK制約ではありません。将来設計書にある本番向けDB構成と、現在のSQLiteスキーマは異なります。
+
+## 10. セットアップ方法
+
+### 前提条件
+
+- Node.js 24とnpm、Git。
+- GitSecurityToolの取得と初回依存関係インストールには通信が必要です。
+- Python 3.11以上はコミット検査用です。アプリの基本動作には不要です。
+- LibreOffice・Poppler・ClamAVとGoogle設定は、該当機能を使用する場合のみ用意します。
+
+### 依存関係と起動
+
+取得済みのプロジェクトのルートで実行します。
+
+```sh
+git submodule update --init --recursive
+npm ci
+npm run dev
+```
+
+新規clone時にサブモジュールも取得する場合は `git clone --recurse-submodules <repository-url>` を使用します。
+
+店舗は `http://localhost:5173/`、管理画面は `http://localhost:5173/#admin` です。ポートを変更した場合はURLも変更してください。
+
+初回起動時にSQLite、初期商品、購入時の固定ファイル版を用意します。DBの手動作成は不要です。初期サンプルのPPTXは `private/downloads/` に含まれています。再生成する場合は `npm run generate` を実行します。初回取り込み後の商品変更は管理画面から行います。
+
+管理用パスワードを環境変数で指定しない場合は、次のローカルファイルを生成します。実際の値は共有しないでください。
+
+- `data/admin-password.txt`：運営管理者。
+- `data/editor-password.txt`：商品管理者。
+
+管理ログインは1時間、購入者セッションは30日で失効します。パスワード紛失時はサーバー停止後に `npm run admin:reset` を実行します。管理者のMFAと既存管理セッションの権限も解除されます。
+
+### コミット検査
+
+Python環境がある場合は次を実行します。
+
+```sh
+python -m pip install pre-commit
+python -m pre_commit install
+python -m pre_commit run --all-files
+```
+
+この作業環境では `.tools/python/` にPython 3.13.7とpre-commitを導入し、フックを有効化済みです。PowerShellでの手動実行例です。
+
+```powershell
+$env:PRE_COMMIT_HOME = Join-Path $PWD '.tools/pre-commit'
+& ./.tools/python/python.exe -m pre_commit run --all-files
+```
+
+`.tools/` はGit管理外のため、別のclone環境には付属しません。検査ラッパーはローカルPythonがあれば優先し、なければ `python` コマンドを使用します。独自の検知語は `GitSecurityTool/GitSecurityTool/keywords.yaml` にローカルで設定します。新しい環境ではサブモジュールの `.git/info/exclude` に同ファイルと検知ログを除外登録し、独自情報をコミットしないでください。
+
+## 11. 環境変数
+
+基本のローカル利用では、アプリの環境変数はすべて省略できます。バックエンドは `process.env` を参照するため、起動するシェルや実行環境に設定してください。現在のサーバー設定には、`.env` の値をバックエンドの `process.env` へ明示的に読み込む処理はありません。
+
+| 変数名 | 用途・既定値 | 必須か |
+| --- | --- | --- |
+| `SHOP_DATA_DIR` | DB・管理パスワード・画像キャッシュなどの保存先。既定 `data`。 | 任意 |
+| `SHOP_FILE_DIR` | 初期PPTXと `versions/` の保存先。既定 `private/downloads`。変更先には初期PPTXも必要。 | 任意 |
+| `SHOP_BACKUP_DIR` | バックアップ保存先。既定 `backups`。 | 任意 |
+| `LOCAL_ADMIN_PASSWORD` | 運営管理者の初期パスワード。未設定ならランダム生成。既存資格情報は上書きしない。 | 任意 |
+| `LOCAL_EDITOR_PASSWORD` | 商品管理者の初期パスワード。同上。 | 任意 |
+| `GOOGLE_CLIENT_ID` | GoogleのOAuthクライアントID。 | Googleログイン時に必須 |
+| `GOOGLE_CLIENT_SECRET` | GoogleのOAuthクライアントシークレット。 | Googleログイン時に必須 |
+| `GOOGLE_REDIRECT_URI` | コールバックURL。ローカル例 `http://localhost:5173/api/auth/google/callback`。 | Googleログイン時に必須 |
+| `SHOP_COOKIE_SECURE` | `true` のときCookieへSecure属性を付与。既定は無効。HTTPS環境では有効にする。 | 任意 |
+| `SHOP_SCAN_MODE` | `auto`（既定）／`required`／`off`。`required` では未検査商品の公開・新規購入も拒否。 | 任意 |
+| `CLAMSCAN_PATH` | ClamAV実行ファイル。既定 `clamscan`。 | 任意 |
+| `CLAMAV_DATABASE_DIR` | ClamAV定義の場所。未指定時は存在する `SHOP_DATA_DIR/clamav`、なければツール既定の場所。 | 任意 |
+| `LIBREOFFICE_PATH` | LibreOffice実行ファイル。既定 `libreoffice`。 | 任意 |
+| `PDFTOPPM_PATH` | Poppler実行ファイル。既定 `pdftoppm`。 | 任意 |
+| `SHOP_BACKUP_INTERVAL_MS` | 自動バックアップ間隔。既定 `86400000`（24時間）、`0` で無効。 | 任意 |
+| `SHOP_BACKUP_KEEP` | 自動バックアップの保持数。既定 `7`、範囲 `1`〜`365`。手動分は保持数削除の対象外。 | 任意 |
+| `SITE_URL` | ビルド時の商品URL・サイトマップの公開オリジン。未設定ならローカルURLを使用しrobots.txtで登録を禁止。 | 任意 |
+| `CHROMIUM_PATH` | Playwrightが起動するブラウザ実行ファイルのパス。 | 任意・テスト用 |
+| `CI` | 設定時、Playwrightが既存開発サーバーを再利用しない。 | 任意・テスト用 |
+| `PRE_COMMIT_HOME` | pre-commitのキャッシュ先。この環境の例は `.tools/pre-commit`。 | 任意・開発用 |
+
+Googleログインは3変数すべてが設定された場合に有効です。Google Cloud側にも同じリダイレクトURIを登録し、必要に応じてテストユーザーを設定します。実際の資格情報はREADMEやGitへ記載せず、シェル・実行環境のSecret設定などで管理してください。詳細は [運用手順](01.doc/local-operations.html) を参照してください。
+
+## 12. 利用可能なコマンド
+
+すべてプロジェクトルートで実行します。
+
+| コマンド | 内容・条件 |
+| --- | --- |
+| `npm ci` | ロックファイルに沿った依存関係のインストール。 |
+| `npm run dev` | 開発用の画面とAPIを起動。 |
+| `npm run build` | TypeScript型検査、Viteビルド、商品別SEOファイル生成。 |
+| `npm run preview` | `dist/` とローカルAPIを起動。通常のURLは `http://localhost:4173/`。 |
+| `npm run generate` | 初期商品JSONからサンプルPPTXと表紙SVGを再生成。 |
+| `npm test` | PlaywrightのPC／モバイルテスト。ブラウザ実行環境が必要。 |
+| `npm run test:server` | Node.jsによるサーバー・ファイル処理テスト。 |
+| `npm run test:tools` | 実際の無料ツールによる変換・検査テスト。該当ツールが必要。 |
+| `npm run tools:check` | LibreOffice・Poppler・ClamAVの利用可否を確認。 |
+| `npm run assets:prepare` | 既存ファイル版の検査・画像準備。サーバー停止後に実行。 |
+| `npm run backup` | DBと固定ファイル版の手動バックアップ。 |
+| `npm run backup:list` | バックアップ一覧。 |
+| `npm run backup:check -- バックアップ名` | チェックサム・SQLite・外部キー・購入済みファイルを検証。 |
+| `npm run restore:drill -- バックアップ名` | 一時領域で復元演習。通常のDBは変更しない。 |
+| `npm run restore -- バックアップ名` | 検査後に復元。開発／プレビューサーバーを停止して実行。 |
+| `npm run admin:reset` | 管理パスワード再発行、MFA・既存管理セッション権限の解除。サーバー停止後に実行。 |
+| `npm run admin:otp` | ローカル確認用の運営管理者TOTP生成。商品管理者は `npm run admin:otp -- editor`。 |
+
+同じDBの端末でTOTPを生成する方法は、独立した第二要素にはなりません。バックアップ・復元の具体的な手順は [ローカル運用手順](01.doc/local-operations.html) を参照してください。
+
+## 13. ドキュメント・設計書
+
+[設計・運用ドキュメント一覧](01.doc/index.html) をブラウザで開くと、各資料を閲覧・印刷・PDF保存できます。
 
 | 資料 | 内容 |
 | --- | --- |
-| [実装状況と残作業](docs/implementation-status.md) | Googleログイン・決済・運用の現状、未設定事項、実販売前チェックリスト |
-| [ローカル運用手順](docs/local-operations.md) | 無料ツールの導入、画像生成・検査、模擬領収書、バックアップ確認・復元演習 |
-| [ローカル基本設計](docs/local-basic-design.md) | 現在の画面・API・SQLite・状態・権限・運用仕様 |
-| [基本設計書（HTML）](docs/production-basic-design.html) | 現在の実装状況・ローカル構成図と、実販売に向けた将来設計。ブラウザ閲覧・印刷・PDF保存対応 |
-| [要件・初期設計](docs/demo-requirements.md) | 現在の要件と実装状況、初期版の設計履歴 |
-| [ECサイトの設計パターン](docs/ec-site-patterns.md) | 一般的な選択肢と、このプロジェクトで採用した方式 |
-| [初期の静的デモの説明](docs/static-demo-history.md) | 過去のREADMEの説明・構成図を保存した履歴 |
+| [要件・初期設計](01.doc/demo-requirements.html) | 要件、完成条件、設計履歴。 |
+| [ローカル基本設計](01.doc/local-basic-design.html) | 現行の画面・API・SQLite・権限・運用仕様。DBとテスト方針も収録。 |
+| [実運用に向けた基本設計](01.doc/production-basic-design.html) | 本番に向けた構成案・決済・データ・運用設計。現行実装と将来案を区別。 |
+| [ローカル運用手順](01.doc/local-operations.html) | ツール準備、ファイル処理、バックアップ・復元。 |
+| [実装状況と残作業](01.doc/implementation-status.html) | 実装範囲、最新の検証記録、未設定・未実装事項。 |
+| [ECサイトの設計パターン](01.doc/ec-site-patterns.html) | 販売モデル、画面、構成方式の比較資料。 |
+| [初期静的デモの履歴](01.doc/static-demo-history.html) | 過去の構成と仕様。現行仕様とは異なる。 |
+| [作業状況](03.log/current_status.txt)・[残課題](03.log/leftover_tasks.txt) | 作業履歴、未解決事項。 |
 
-初期サンプルは表紙と3枚の内容ページを含む自作資料です。学習・編集・商用利用を許可します。元ファイルの再販売・再配布は禁止します。
+独立したDB設計書・詳細設計書・テスト仕様書は現在ありません。DBスキーマは `storage.mjs`、テストケースは `02.src/tests/` と基本設計内の記述を参照してください。
+
+## 14. デプロイ方法
+
+現在確認できる提供形態は、開発サーバーまたはローカルのビルド／プレビューです。本番向けデプロイ設定や独立した本番APIサーバーは用意していません。
+
+```sh
+npm run build
+npm run preview
+```
+
+ビルドが成功すると `dist/` に画面・商品別HTML・サイトマップを生成します。プレビューでもViteのプラグインからAPIを起動するため、実行時にはNode.js、サーバー実装、依存関係、DB、非公開PPTXが必要です。`dist/` だけを静的ホスティングへ置いてもAPIは動きません。
+
+この環境では最新のビルドが異常終了しており、上記手順の再検証は完了していません。実販売には決済・Webhook・外部メール・本番ストレージ・HTTPS・運用基盤などの追加実装と検証が必要です。
+
+## 15. 制約・注意事項
+
+- **学習用の模擬販売です。** 実決済、実返金、Webhook入金確認、外部メール配信、本番ストレージ、外部障害通知は未実装です。模擬注文や模擬領収書は入金の証明になりません。
+- **最新の確認結果（2026年10月19日）：** Windows対応後のサーバー・ファイル処理テスト11件と、移動後の対象ファイルを含むセキュリティフック検査は成功しました。構成整理時はビルド成功、その後の再実行は型検査・32モジュール変換後にWindows異常終了 `0xC0000409` で停止しています。依存関係の復元後も再現し、原因は未特定です。
+- アプリのブラウザテスト、実Google認証、実変換ツールの再検証は今回未実施です。HTML資料の全8ページはリンク・PC／スマートフォン表示を確認済みです。過去のLinux環境でのブラウザ依存ライブラリ不足の記録と、現在のWindowsビルド異常は別の問題です。
+- 匿名注文の取得には元のブラウザCookieが必要です。Googleログイン済みなら別端末でもログインしてリンクを再発行できます。返金後も、取得済みファイルの回収はできません。
+- `data/`、`backups/`、`00.secret/`、生成済みファイル版、環境変数ファイルはGit管理外です。DB・バックアップには個人情報とMFA関連情報が含まれます。公開・共有しないでください。
+- DB変更前はバックアップし、DBと `private/downloads/versions/` を整合させて復元します。一般的なスキーマ移行ツールは未導入です。JSON内の関係はDBの外部キーでは保護されません。
+- 自動バックアップはサーバー稼働中のみ実行します。同じディスクの保存はディスク故障対策にならず、別媒体への保管は運営者が行います。
+- ClamAVの定義更新と変換プロセスのOS隔離は別途必要です。`SHOP_SCAN_MODE=auto` ではClamAV未導入を未検査として扱います。検査失敗や問題検出時は登録を拒否します。
+- 商品メタ情報はビルド時点の情報です。変更後は再ビルドが必要です。`SITE_URL` 未設定では検索エンジンの登録をrobots.txtで禁止します。イベント件数は厳密な利用人数・転換率を示しません。
+- 販売者情報、実販売の税・領収書、返金条件、個人情報の保存期間は販売開始前に確定する必要があります。
+
+## 16. ディレクトリ構成
+
+```text
+ec_site_sample/
+├── 00.secret/                 # ローカル秘密情報（Git管理外）
+├── 01.doc/                    # HTMLの要件・設計・運用資料、作成ルール
+│   ├── index.html             # 資料一覧
+│   └── assets/                # 共通の資料用CSS
+├── 02.src/
+│   ├── src/                   # React画面・API型・初期商品JSON・CSS
+│   ├── server/                # API・SQLite・認証・ファイル・運用処理
+│   ├── scripts/               # サンプル生成・SEO・バックアップ・検査
+│   ├── tests/                 # Node.js・Playwrightテスト
+│   ├── public/previews/       # 初期商品の表紙SVG
+│   └── index.html             # アプリのHTML入口
+├── 03.log/                    # 再利用プロンプト・進捗・残課題
+├── GitSecurityTool/           # コミット検査用サブモジュール
+├── private/downloads/         # 初期サンプルPPTX
+│   └── versions/              # SHA-256で固定する版（生成・Git管理外）
+├── data/                      # SQLite・管理パスワード等（生成・Git管理外）
+├── backups/                   # DB・固定ファイル版（生成・Git管理外）
+├── dist/                      # ビルド成果物（生成・Git管理外）
+├── .tools/                    # この環境のローカル開発ツール（Git管理外）
+├── .pre-commit-config.yaml    # コミット検査設定
+├── vite.config.mjs            # 画面とAPIの開発／プレビュー設定
+├── playwright.config.ts      # PC／モバイルテスト設定
+├── tsconfig.json              # TypeScript設定
+├── package.json
+├── package-lock.json
+└── README.md
+```
+
+設定ファイルとnpmコマンドの実行場所はプロジェクトルートです。既存データを保つため、DB・バックアップ・配布ファイルの保存先は番号付きフォルダへ移動せず維持しています。
+
+## 17. ライセンス
+
+アプリケーション全体のライセンスは未定義です。プロジェクトルートにLICENSEファイルは確認できません。`package.json` の `private: true` はnpm公開を防ぐ設定で、利用許諾を定めるものではありません。
+
+既存の説明では、初期サンプルPPTXは自作資料で、学習・編集・商用利用を許可し、元ファイルの再販売・再配布は禁止しています。この条件をアプリ全体のライセンスとは扱いません。依存ライブラリ・サブモジュールには、それぞれの利用条件が適用されます。

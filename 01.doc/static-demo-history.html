@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Slide Marketの初期の静的デモの説明。ローカルで閲覧・印刷できるプロジェクト資料。">
+<title>初期の静的デモの説明 | Slide Market 資料</title><link rel="stylesheet" href="assets/documents.css"></head>
+<body><a class="skip" href="#content">本文へ移動</a><header class="masthead"><div class="header-inner"><a class="brand" href="index.html">SLIDE MARKET <span>PROJECT DOCUMENTS</span></a><div class="header-actions"><a href="index.html">資料一覧</a><button type="button" onclick="window.print()">印刷・PDF保存</button></div></div></header>
+<div class="page-heading"><p class="eyebrow">履歴</p><h1>初期の静的デモの説明</h1><p class="meta">HTML版整備：2026年10月19日 · 対象：ec_site_sample</p></div>
+<div class="layout "><aside class="toc" aria-label="ページ内の目次"><p class="eyebrow">CONTENTS</p><a href="#_1">起動</a><a href="#_2">機能</a><a href="#_3">ディレクトリ構成</a><a href="#_4">アプリの仕組み</a><a href="#_9">検証</a><a href="#_10">制約</a></aside><main id="content" tabindex="-1"><div class="notice archive"><strong>設計履歴</strong><p>このページは初期版の記録です。ファイル配置や動作を現在の仕様へ読み替えず、現行仕様は <a href="local-basic-design.html">ローカル基本設計</a> を参照してください。</p></div><article><p>この資料はローカルAPI追加以前のREADMEの説明を保存したものです。以下の公開PPTX・localStorage注文・Node.js 22.12の記載は当時の仕様です。現在の仕様は <a href="../README.md">README</a> と <a href="local-basic-design.html">ローカル基本設計</a> を参照してください。</p>
+<h2 id="_1">起動</h2>
+<p>Node.js 22.12以上（この環境では24を使用）で実行します。</p>
+<pre><code class="language-sh">npm ci --cache /tmp/slide-market-npm-cache
+npm run dev
+</code></pre>
+<p>開発サーバーの既定ポートは5173です。</p>
+<h2 id="_2">機能</h2>
+<ul>
+<li>6商品の一覧、検索、カテゴリ絞り込み、詳細・表紙プレビュー</li>
+<li>重複しないカート、合計、削除、ブラウザへの保存</li>
+<li>成功・失敗を切り替えられる模擬決済</li>
+<li>注文完了、PPTXダウンロード、直近100件のデモ注文履歴</li>
+<li>ご利用ガイド、保存データのリセット、モバイル対応</li>
+</ul>
+<p>商品情報は <code>src/products.json</code> で更新します。ファイルと表紙は次のコマンドで再生成します。</p>
+<pre><code class="language-sh">npm run generate
+</code></pre>
+<p>各商品は表紙と3枚の内容ページを含む自作サンプルです。編集・学習・商用利用を許可します。元ファイルの再販売・再配布は禁止します。</p>
+<h2 id="_3">ディレクトリ構成</h2>
+<pre><code class="language-text">ec_site_sample/
+├── src/
+│   ├── main.tsx             # 画面・カート・模擬決済・注文履歴
+│   ├── products.json        # 6商品の情報
+│   └── style.css            # デザイン・レスポンシブ対応
+├── public/
+│   ├── downloads/           # 各商品4ページのサンプルPPTX
+│   └── previews/            # 商品の表紙SVG画像
+├── scripts/
+│   └── generate-slides.mjs  # PPTXと表紙画像の生成
+├── tests/
+│   └── shop.spec.ts          # ブラウザでの動作テスト
+├── 01.doc/
+│   ├── ec-site-patterns.md  # ECサイトの設計パターン整理
+│   └── demo-requirements.md # 要件・初期設計
+├── index.html              # アプリを読み込むHTML
+├── package.json            # 依存パッケージと実行コマンド
+├── package-lock.json       # 依存パッケージのバージョン固定
+├── playwright.config.ts    # PC・モバイルのブラウザテスト設定
+├── tsconfig.json           # TypeScriptの設定
+├── .gitignore              # Git管理から除外するファイル
+└── README.md
+</code></pre>
+<h2 id="_4">アプリの仕組み</h2>
+<h3 id="_5">構成図</h3>
+<figure class="history-flow"><div class="flow-row"><div><b>ソース・生成処理</b><p>商品JSON → スライド生成</p></div><span aria-hidden="true">→</span><div><b>静的ファイル</b><p>表紙SVG・公開PPTX</p></div></div><div class="flow-arrow" aria-hidden="true">↓</div><div class="flow-row"><div><b>Reactアプリ</b><p>商品一覧・カート・模擬決済</p></div><span aria-hidden="true">↔</span><div><b>ブラウザ内の保存</b><p>localStorageの注文・カート</p></div></div><div class="flow-arrow" aria-hidden="true">↓</div><div class="flow-row"><div><b>注文完了・履歴</b><p>公開URLのリンクからPPTXを取得</p></div></div><figcaption>初期静的デモの構成。サーバーによる購入権限の照合はありません。生成物をアプリが表示し、購入操作の成功・失敗と注文の保存をブラウザ内で処理します。</figcaption></figure><details class="diagram-source"><summary>構成図の元データ（Mermaid）</summary><pre><code class="language-mermaid">flowchart TD
+    subgraph source[&quot;ソースと生成処理&quot;]
+        products[&quot;src/products.json：商品情報&quot;]
+        generator[&quot;scripts/generate-slides.mjs&lt;br/&gt;npm run generate&quot;]
+        products --&gt;|読み込み| generator
+    end
+
+    subgraph static[&quot;静的ファイルの配信&quot;]
+        previews[&quot;public/previews/：表紙SVG&quot;]
+        downloads[&quot;public/downloads/：PPTX&quot;]
+    end
+
+    subgraph browser[&quot;ブラウザ内&quot;]
+        app[&quot;Reactアプリ：src/main.tsx&lt;br/&gt;URLのハッシュで画面切替&quot;]
+        storage[&quot;localStorage&lt;br/&gt;カート・直近100件のデモ注文履歴&quot;]
+        payment[&quot;模擬決済：成功・失敗を選択&lt;br/&gt;実際の販売・請求なし&quot;]
+        order[&quot;注文完了・注文履歴&lt;br/&gt;ダウンロードリンク&quot;]
+        app &lt;--&gt;|保存・復元| storage
+        app --&gt;|カートから購入操作| payment
+        payment --&gt;|成功時に注文を作成| app
+        payment --&gt;|失敗時にエラーを表示| app
+        app --&gt;|保存した注文を表示| order
+    end
+
+    products --&gt;|ビルド時にアプリへ組み込み| app
+    generator --&gt;|生成| previews
+    generator --&gt;|生成| downloads
+    previews --&gt;|表紙画像を表示| app
+    order --&gt;|公開URLから取得| downloads
+</code></pre></details>
+<p>バックエンドやデータベースはありません。PPTXの公開URLは購入操作なしでも利用でき、図のダウンロードリンクには購入権限を検証する処理はありません。</p>
+<h3 id="_6">画面と商品情報</h3>
+<p>バックエンドやデータベースを使わず、Reactでブラウザ内の画面と状態を管理します。<code>src/main.tsx</code> がURLのハッシュ（<code>#</code> 以降）を読み取り、<code>#home</code> は商品一覧、<code>#product/proposal</code> は商品詳細、<code>#cart</code> はカート、<code>#checkout</code> は模擬決済、<code>#order/注文ID</code> は注文完了、<code>#history</code> は注文履歴、<code>#guide</code> はご利用ガイドを表示します。</p>
+<p>商品情報は <code>src/products.json</code> から読み込みます。商品名、価格、カテゴリ、説明、スライドの内容などを変更する場合は、このファイルを更新します。</p>
+<h3 id="_7">カート・模擬決済・注文履歴</h3>
+<p>カートには商品IDを重複しないように保存し、商品情報から合計金額を計算します。模擬決済では「成功」「失敗を試す」を選べます。成功するとデモ注文を作成してカートを空にし、注文完了画面へ移動します。失敗するとエラーを表示し、カートを残して再試行できます。実際の決済サービスには接続せず、カード情報や個人情報の入力はありません。</p>
+<p>カートと直近100件のデモ注文履歴は、ブラウザの <code>localStorage</code> にキー <code>slide-market-demo-v1</code> で保存します。同じブラウザ・同じオリジンで再読み込みしても保持されますが、別の端末には引き継がれません。ご利用ガイドのリセット操作で、保存したカートと注文履歴を空にできます。</p>
+<h3 id="_8">ファイルの生成とダウンロード</h3>
+<p>PPTXは <code>public/downloads/</code>、表紙のSVG画像は <code>public/previews/</code> に置き、静的ファイルとして配布します。注文完了画面と注文履歴のダウンロードリンクは、<code>/downloads/商品ID.pptx</code> を参照します。ファイルは購入操作なしでもURLから取得でき、本番販売用のアクセス制御はありません。</p>
+<p>商品情報を更新した後、リポジトリのルートで <code>npm run generate</code> を実行すると、<code>scripts/generate-slides.mjs</code> が商品情報を読み取り、PPTXとプレビュー画像を再生成します。各PPTXは表紙と3枚の内容ページで構成されます。</p>
+<h2 id="_9">検証</h2>
+<pre><code class="language-sh">npm run build
+PLAYWRIGHT_BROWSERS_PATH=/tmp/slide-market-browsers npx playwright install chromium
+PLAYWRIGHT_BROWSERS_PATH=/tmp/slide-market-browsers npm test
+</code></pre>
+<p>このクラウド環境では既存のChromiumを使い、<code>CHROMIUM_PATH=/usr/bin/chromium npm test</code> でも実行できます。</p>
+<p>ブラウザテストはデスクトップとモバイルの画面幅で、検索、購入、失敗時の再試行、ダウンロード、保存、削除、リセットなどを確認します。Linux環境によってはPlaywrightのOS依存ライブラリが別途必要です。</p>
+<h2 id="_10">制約</h2>
+<p>決済はブラウザ内のシミュレーションです。個人情報・カード情報は入力しません。注文・カートはローカルストレージに保存され、購入証明には使えません。PPTXファイルは公開パスにあるため、購入操作なしでも取得できます。本番販売にはサーバーでの価格計算、決済連携、Webhook検証、注文管理、非公開ファイルのアクセス制御が必要です。</p>
+<p>設計資料：<code>01.doc/ec-site-patterns.md</code>、<code>01.doc/demo-requirements.md</code>。</p>
+<p>実運用に向けた基本設計書：<a href="production-basic-design.html">production-basic-design.html</a>。HTMLファイルをブラウザで開くと、構成図、機能・画面・データ・API設計、運用・テスト方針を確認できます。印刷・PDF保存にも対応しています。</p></article><footer><p>Slide Market · 学習用ローカルデモ</p><nav aria-label="関連資料"><a href="local-basic-design.html">ローカル基本設計</a><a href="demo-requirements.html">要件・初期設計</a><a href="local-operations.html">ローカル運用手順</a><a href="implementation-status.html">実装状況と残作業</a><a href="production-basic-design.html">実運用に向けた基本設計</a><a href="ec-site-patterns.html">ECサイトの設計パターン</a><a href="static-demo-history.html" aria-current="page">初期の静的デモの説明</a></nav><p><a href="index.html">資料一覧に戻る</a> · <a href="../README.md">README（Markdown）</a></p></footer></main></div></body></html>

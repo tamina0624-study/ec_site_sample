@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Slide Marketの実装状況と残作業。ローカルで閲覧・印刷できるプロジェクト資料。">
+<title>実装状況と残作業 | Slide Market 資料</title><link rel="stylesheet" href="assets/documents.css"></head>
+<body><a class="skip" href="#content">本文へ移動</a><header class="masthead"><div class="header-inner"><a class="brand" href="index.html">SLIDE MARKET <span>PROJECT DOCUMENTS</span></a><div class="header-actions"><a href="index.html">資料一覧</a><button type="button" onclick="window.print()">印刷・PDF保存</button></div></div></header>
+<div class="page-heading"><p class="eyebrow">進捗</p><h1>実装状況と残作業</h1><p class="meta">HTML版整備：2026年10月19日 · 対象：ec_site_sample</p></div>
+<div class="layout "><aside class="toc" aria-label="ページ内の目次"><p class="eyebrow">CONTENTS</p><a href="#latest-verification">最新の検証記録</a><a href="#_1">現在の状態</a><a href="#google">Googleログインを有効にする作業</a><a href="#_2">実販売前に残る作業</a><a href="#_3">この環境での検証</a></aside><main id="content" tabindex="-1"><div class="notice"><strong>2026年10月19日の整備・検証状況</strong><p>実装・テストは <code>02.src/</code>、資料は <code>01.doc/</code> に整理済み。サーバー・ファイル処理テスト11件とセキュリティフック検査は成功しています。ビルドは構成整理時に成功しましたが、直近の再実行では変換後にWindows異常終了 <code>0xC0000409</code> が発生し、未解決です。ブラウザ・実Google認証・実外部ツールは今回未検証です。</p><p>以下の本文にある過去の日付・検証記録は当時の結果です。最新の詳細は <a href="implementation-status.html#latest-verification">実装状況と残作業</a> を参照してください。</p></div><article><h2 id="latest-verification">最新の検証記録（2026年10月19日）</h2><ul><li>Windows対応後のサーバー・ファイル処理テスト：11件すべて成功。</li><li>GitSecurityTool・gitleaks・基本フック：移動後のファイルを含め全検査成功。</li><li>Python 3.13.7とpre-commitをGit管理外の <code>.tools/</code> に導入し、コミットフックを有効化。</li><li>最新ビルド：型検査・32モジュールの変換後にWindows異常終了。依存関係復元後も再現し、原因は未特定。</li><li>ブラウザ・実Google認証・実外部ツール：今回未検証。下記の2026年10月9日の記録とは区別する。</li></ul><p>更新日：2026年10月9日。現在のコード・設定・この作業環境での検証結果をまとめます。操作手順は <a href="../README.md">README</a>、現行仕様は <a href="local-basic-design.html">ローカル基本設計</a>、実販売向けの目標設計は <a href="production-basic-design.html">基本設計書（HTML）</a> を参照してください。</p>
+<h2 id="_1">現在の状態</h2>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>項目</th>
+<th>状態</th>
+<th>範囲・注意</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Googleログイン</td>
+<td>コード実装済み、環境設定待ち</td>
+<td>Google OIDC、state・nonce・PKCE、確認済みメールアドレスとsubject検証、HttpOnly Cookieセッション。現在の環境にはOAuth資格情報がなく、店舗ではログインボタンが非表示です。</td>
+</tr>
+<tr>
+<td>既存購入の引継ぎ</td>
+<td>実装・モック検証済み</td>
+<td>初回ログイン時に同じブラウザの匿名注文とお気に入りをGoogleアカウントへ移します。</td>
+</tr>
+<tr>
+<td>アカウント共有</td>
+<td>実装・モック検証済み</td>
+<td>同じGoogleアカウントでログインした別セッションから、注文・お気に入りを参照し、購入済みファイルを取得できます。</td>
+</tr>
+<tr>
+<td>決済</td>
+<td>模擬決済のみ</td>
+<td>注文成功・失敗を画面から選択します。実請求、Stripe等のCheckout、Webhookによる入金確認、実返金はありません。</td>
+</tr>
+<tr>
+<td>メール・運用基盤</td>
+<td>ローカル保存のみ</td>
+<td>メール配信、外部監視、本番DB・ストレージへの接続はありません。</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="google">Googleログインを有効にする作業</h2>
+<ol>
+<li>Google Cloudでウェブアプリ用OAuthクライアントを作成し、OAuth同意画面とテストユーザーを設定する。</li>
+<li>実行環境へ <code>GOOGLE_CLIENT_ID</code>、<code>GOOGLE_CLIENT_SECRET</code>、<code>GOOGLE_REDIRECT_URI</code> を設定する。ローカルのリダイレクト先は <code>http://localhost:5173/api/auth/google/callback</code>。</li>
+<li>開発サーバーを再起動し、実際のGoogleアカウントでログイン、キャンセル、失敗、ログアウト、端末を変えた履歴とダウンロードを確認する。</li>
+<li>本番利用時はHTTPSの公開URLをGoogle Cloudへ登録し、<code>SHOP_COOKIE_SECURE=true</code> を設定する。Client SecretはSecret管理へ置き、Gitやクライアント側へ出さない。</li>
+</ol>
+<p>この環境ではClient ID／Secretが未設定のため、実Googleとの認可コード交換・Google Cloud側の同意画面設定は未検証です。サーバーテストはOIDC部分をモック化して状態遷移と所有権を検証しています。</p>
+<h2 id="_2">実販売前に残る作業</h2>
+<ul>
+<li>実決済：ホスト型Checkout、署名付きWebhookとイベント重複排除、入金照合、状態不明時の再照会、返金・異議申し立て処理。</li>
+<li>購入者データ：アカウント削除・データ保持期間・問い合わせ窓口を決定し、プライバシー表示と運用手順へ反映する。</li>
+<li>メールと運用：購入完了・問い合わせ通知の外部配信、再送監視、障害監視、対応手順を整える。</li>
+<li>本番基盤：SQLiteから本番DBへ移行し、非公開オブジェクトストレージ、HTTPS、Secret管理、検証／本番分離を用意する。</li>
+<li>販売条件：販売者情報、税区分・税計算、領収書要件、返金条件、提供期間を確定し、実販売用ページと注文記録へ反映する。</li>
+<li>ファイル運用：ClamAV定義の更新手順を確立し、PPTX変換をOSレベルで隔離する。本番バックアップを別媒体へ保管し、復元演習を行う。</li>
+<li>ブラウザ検証：この作業環境ではChromium起動に必要な <code>libatk-1.0.so.0</code> がなく、Playwright全体を完了できていません。OS依存ライブラリを導入した環境でPC／モバイルの全シナリオを再実行する。</li>
+</ul>
+<h2 id="_3">この環境での検証</h2>
+<ul>
+<li><code>npm run build</code>：成功。</li>
+<li><code>npm run test:server</code>：11件成功。OIDCモックで匿名購入引継ぎ、別セッションでの注文・お気に入り共有、購入済み重複防止、ログアウト後の拒否、リセット後のアカウント注文保持を確認。</li>
+<li><code>npm test</code>：未完了。Playwrightの一部非ブラウザAPIテストは実行できましたが、ChromiumのOS依存ライブラリ不足でブラウザケースを実行できませんでした。</li>
+<li>実Google OAuth、本番決済、メール配信、本番インフラ：資格情報・サービス未設定のため未検証。</li>
+</ul></article><footer><p>Slide Market · 学習用ローカルデモ</p><nav aria-label="関連資料"><a href="local-basic-design.html">ローカル基本設計</a><a href="demo-requirements.html">要件・初期設計</a><a href="local-operations.html">ローカル運用手順</a><a href="implementation-status.html" aria-current="page">実装状況と残作業</a><a href="production-basic-design.html">実運用に向けた基本設計</a><a href="ec-site-patterns.html">ECサイトの設計パターン</a><a href="static-demo-history.html">初期の静的デモの説明</a></nav><p><a href="index.html">資料一覧に戻る</a> · <a href="../README.md">README（Markdown）</a></p></footer></main></div></body></html>

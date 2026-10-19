@@ -5,3 +5,16 @@ playwright-report/
 data/
 backups/
 private/downloads/versions/
+
+00.secret/
+.env
+.env.*
+!.env.example
+.npm-cache/
+*.log
+__pycache__/
+.venv/
+
+!03.log/
+!03.log/**
+.tools/

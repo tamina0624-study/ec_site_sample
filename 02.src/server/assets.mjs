@@ -11,7 +11,10 @@ export function assetConfig(env=process.env){
  const mode=env.SHOP_SCAN_MODE||'auto';if(!['auto','required','off'].includes(mode))throw new Error('SHOP_SCAN_MODEはauto / required / offを指定してください。');
  const localDatabase=resolve(env.SHOP_DATA_DIR||'data','clamav');return {mode,scanner:env.CLAMSCAN_PATH||'clamscan',database:env.CLAMAV_DATABASE_DIR||(existsSync(localDatabase)?localDatabase:''),office:env.LIBREOFFICE_PATH||'libreoffice',raster:env.PDFTOPPM_PATH||'pdftoppm'};
 }
-async function run(command,args,timeout=90000){return execute(command,args,{timeout,maxBuffer:1024*1024,windowsHide:true});}
+async function run(command,args,timeout=90000){
+ const [executable,...prefix]=Array.isArray(command)?command:[command];
+ return execute(executable,[...prefix,...args],{timeout,maxBuffer:1024*1024,windowsHide:true});
+}
 const missing=e=>e.code==='ENOENT';
 export async function scanFile(path,config=assetConfig()){
  if(config.mode==='off')return {status:'disabled',engine:'ClamAV'};

@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Slide MarketのECサイトの設計パターン。ローカルで閲覧・印刷できるプロジェクト資料。">
+<title>ECサイトの設計パターン | Slide Market 資料</title><link rel="stylesheet" href="assets/documents.css"></head>
+<body><a class="skip" href="#content">本文へ移動</a><header class="masthead"><div class="header-inner"><a class="brand" href="index.html">SLIDE MARKET <span>PROJECT DOCUMENTS</span></a><div class="header-actions"><a href="index.html">資料一覧</a><button type="button" onclick="window.print()">印刷・PDF保存</button></div></div></header>
+<div class="page-heading"><p class="eyebrow">比較資料</p><h1>ECサイトの設計パターン</h1><p class="meta">HTML版整備：2026年10月19日 · 対象：ec_site_sample</p></div>
+<div class="layout "><aside class="toc" aria-label="ページ内の目次"><p class="eyebrow">CONTENTS</p><a href="#1">1. この資料の前提と調査範囲</a><a href="#2">2. 販売モデルでよくあるパターン</a><a href="#3">3. 画面構成と購入フロー</a><a href="#4">4. デザイン・操作でよくあるパターン</a><a href="#5">5. 構築方法の代表的な選択肢</a><a href="#6-mvp">6. 初期版（MVP）に含める機能</a><a href="#7">7. データと業務処理の基本パターン</a><a href="#8">8. 日本向け販売で検討する項目</a><a href="#9">9. 開発・公開前に確認する代表的なケース</a><a href="#10">10. このプロジェクトで採用した構成</a><a href="#11-url">11. 参考URLと追加調査先</a></aside><main id="content" tabindex="-1"><div class="notice"><strong>2026年10月19日の整備・検証状況</strong><p>実装・テストは <code>02.src/</code>、資料は <code>01.doc/</code> に整理済み。サーバー・ファイル処理テスト11件とセキュリティフック検査は成功しています。ビルドは構成整理時に成功しましたが、直近の再実行では変換後にWindows異常終了 <code>0xC0000409</code> が発生し、未解決です。ブラウザ・実Google認証・実外部ツールは今回未検証です。</p><p>以下の本文にある過去の日付・検証記録は当時の結果です。最新の詳細は <a href="implementation-status.html#latest-verification">実装状況と残作業</a> を参照してください。</p></div><article><p>作成日：2026年9月30日</p>
+<p>対象：これからECサイトを構築する際の企画・設計のたたき台</p>
+<h2 id="1">1. この資料の前提と調査範囲</h2>
+<p>販売する商品、規模、予算が未定のため、日本国内向け・単一店舗・一般消費者向けの物販を基準に整理する。デジタル商品、定期購入、複数出店者のサイトとの差分も扱う。</p>
+<p>この資料は一般的なECの設計知識を整理したもので、個別サイトの実測比較や最新の市場調査ではない。外部資料の取得を試みたが、環境のネットワーク制限によりHTTPプロキシから403が返り、本文を確認できなかった。そのため、普及率・売上への効果・最新料金についての数値は載せていない。末尾の参考URLは追加調査先として掲載する。</p>
+<h2 id="2">2. 販売モデルでよくあるパターン</h2>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>パターン</th>
+<th>主な用途</th>
+<th>特有の機能・設計</th>
+<th>初期開発の負担</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>単一店舗の物販</td>
+<td>雑貨、衣類、食品など</td>
+<td>商品、バリエーション、在庫、配送、注文管理</td>
+<td>比較的抑えやすい</td>
+</tr>
+<tr>
+<td>ブランド直販（D2C）</td>
+<td>自社ブランドの商品販売</td>
+<td>単一店舗の機能に、ブランド紹介、特集、コンテンツを追加</td>
+<td>コンテンツ制作が増える</td>
+</tr>
+<tr>
+<td>デジタル商品</td>
+<td>PDF、素材、ソフトウェアなど</td>
+<td>決済後のダウンロード権限、期限付きURL、再取得</td>
+<td>配送は不要だが権限管理が必要</td>
+</tr>
+<tr>
+<td>定期購入</td>
+<td>消耗品、食品の定期便など</td>
+<td>継続課金、休止、解約、次回配送、決済失敗時の再処理</td>
+<td>高い</td>
+</tr>
+<tr>
+<td>マーケットプレイス</td>
+<td>複数出店者の商品販売</td>
+<td>出店者管理、注文分割、手数料、売上分配、責任分界</td>
+<td>非常に高い</td>
+</tr>
+<tr>
+<td>B2B販売</td>
+<td>企業向け仕入れ</td>
+<td>取引先ごとの価格、見積、掛け払い、承認、数量制限</td>
+<td>取引ルールに左右される</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>初期案：</strong> 特別な要件がなければ、単一店舗の物販から始める。定期購入やマーケットプレイスは、販売モデルとして必須になった段階で設計する。</p>
+<h2 id="3">3. 画面構成と購入フロー</h2>
+<h3 id="_1">標準的な画面</h3>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>画面</th>
+<th>主な内容</th>
+<th>設計上のポイント</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>トップ</td>
+<td>ブランド紹介、カテゴリ、特集、人気商品</td>
+<td>最初の画面で何を販売しているか伝わる</td>
+</tr>
+<tr>
+<td>商品一覧・検索結果</td>
+<td>商品画像、名前、価格、在庫、絞り込み、並び替え</td>
+<td>商品数が少ない段階では絞り込みを増やしすぎない</td>
+</tr>
+<tr>
+<td>商品詳細</td>
+<td>画像、説明、価格、選択肢、在庫、送料、配送目安</td>
+<td>サイズ・色などを選択してからカートへ追加する</td>
+</tr>
+<tr>
+<td>カート</td>
+<td>商品、数量、小計、送料の見込み</td>
+<td>数量変更・削除・購入への移動を分かりやすくする</td>
+</tr>
+<tr>
+<td>チェックアウト</td>
+<td>連絡先、配送先、配送方法、支払い、最終確認</td>
+<td>総額と注文条件を確定前に確認できる</td>
+</tr>
+<tr>
+<td>注文完了</td>
+<td>注文番号、購入内容、配送予定、問い合わせ先</td>
+<td>決済状態をサーバー側で確認して表示する</td>
+</tr>
+<tr>
+<td>マイページ</td>
+<td>注文履歴、住所、会員情報</td>
+<td>初期段階では会員機能を省略してもよい</td>
+</tr>
+<tr>
+<td>ご利用ガイド</td>
+<td>配送、支払い、返品、問い合わせ</td>
+<td>購入前に不明点を解消できる</td>
+</tr>
+<tr>
+<td>法定・ポリシーページ</td>
+<td>特商法表記、プライバシー、利用規約等</td>
+<td>実際の運営・販売条件と一致させる</td>
+</tr>
+<tr>
+<td>管理画面</td>
+<td>商品、在庫、注文、出荷、返金</td>
+<td>購入者の画面と権限を分ける</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="_2">よくある購入の流れ</h3>
+<pre><code class="language-text">トップ／検索 → 商品一覧 → 商品詳細 → カート
+  → 配送先入力 → 配送・支払い方法の選択 → 注文内容の最終確認
+  → 支払い → 注文完了 → 確認通知 → 出荷通知
+</code></pre>
+<p>外部の決済画面を利用する場合は、配送先入力や最終確認を決済サービス側で担当することもある。画面の分担は、採用するサービスと日本向けの表示要件を確認して決める。</p>
+<h3 id="_3">チェックアウトの代表的な形式</h3>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>形式</th>
+<th>向いているケース</th>
+<th>注意点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1ページ形式</td>
+<td>入力項目が少ない購入</td>
+<td>モバイルで長くなりやすく、エラー位置を見つけやすくする必要がある</td>
+</tr>
+<tr>
+<td>ステップ形式</td>
+<td>配送・支払いの選択が多い購入</td>
+<td>現在位置、残りの手順、入力内容の保持が必要</td>
+</tr>
+<tr>
+<td>決済サービスのホスト画面</td>
+<td>決済を早く導入したい場合</td>
+<td>ブランド表現や入力項目の自由度、画面分担を確認する</td>
+</tr>
+</tbody>
+</table></div>
+<p>ゲスト購入を基本にすると、会員登録を購入の前提にせずに済む。会員化が必要なら、購入後の登録導線も検討する。</p>
+<h2 id="4">4. デザイン・操作でよくあるパターン</h2>
+<ul>
+<li><strong>カテゴリ中心：</strong> 商品の種類から探す。カテゴリ名は購入者が理解できる言葉にする。</li>
+<li><strong>検索中心：</strong> 商品数が多い場合に適する。検索語の保持、該当なしの案内、条件解除を用意する。</li>
+<li><strong>特集・ストーリー中心：</strong> ブランドや用途から商品を提案する。読み物から商品詳細へ進めるようにする。</li>
+<li><strong>商品カードの統一：</strong> 画像比率、商品名、価格、販売状態を揃え、比較しやすくする。</li>
+<li><strong>モバイルを前提にする：</strong> タップ領域、画像の読み込み、フォームの入力補助を整える。</li>
+<li><strong>購入判断の情報を近くに置く：</strong> 送料、配送目安、返品条件を購入ボタンの周辺から確認できるようにする。</li>
+<li><strong>アクセシビリティを基本にする：</strong> キーボード操作、フォームのラベル、明確なエラー、色だけに頼らない状態表示を用意する。</li>
+</ul>
+<p>レビュー、ランキング、おすすめ商品、お気に入りは追加候補。実際の投稿や注文データがない段階で、架空のレビューや人気順位を表示しない。</p>
+<h2 id="5">5. 構築方法の代表的な選択肢</h2>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>方法</th>
+<th>概要</th>
+<th>メリット</th>
+<th>注意点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SaaS型EC</td>
+<td>Shopify、BASE、STORESなどを利用</td>
+<td>管理・決済・注文の機能を早く揃えやすい</td>
+<td>料金、拡張制約、データ移行、日本向け機能を確認する</td>
+</tr>
+<tr>
+<td>CMS＋ECプラグイン</td>
+<td>WordPress＋WooCommerceなど</td>
+<td>コンテンツと販売を一体で管理しやすい</td>
+<td>更新、バックアップ、プラグインの互換性を管理する</td>
+</tr>
+<tr>
+<td>ヘッドレスEC</td>
+<td>EC基盤をAPI経由で独自画面と接続</td>
+<td>画面や外部連携の自由度が高い</td>
+<td>認証、API制限、キャッシュ、プレビューなどの連携が増える</td>
+</tr>
+<tr>
+<td>独自開発</td>
+<td>商品・注文などの仕組みを自作</td>
+<td>独自業務に合わせやすい</td>
+<td>在庫・決済・返金・運用まで開発責任が広がる</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>選び方：</strong> 早期の実販売が目的ならSaaSを最初に比較する。開発学習や独自体験が目的なら、独自フロントエンドとホスト型決済の組み合わせを検討する。独自開発でも、カード情報の入力・保管は決済サービスに委ねる構成を基本案とする。</p>
+<p>現在のリポジトリは空のため、言語・フレームワークは未選定。この資料では特定の技術への依存を決めない。</p>
+<h2 id="6-mvp">6. 初期版（MVP）に含める機能</h2>
+<h3 id="_4">初期版の候補</h3>
+<ol>
+<li>商品一覧・詳細。必要な商品画像、説明、価格、在庫を表示する。</li>
+<li>サイズ・色などの商品バリエーション。商品に不要なら省略する。</li>
+<li>カートの追加・数量変更・削除。</li>
+<li>ゲスト購入、配送先入力、送料計算、注文内容の最終確認。</li>
+<li>決済サービスによる支払いと、Webhookによる結果の確定。</li>
+<li>在庫不足の判定と、注文・在庫更新の整合性維持。</li>
+<li>注文完了表示、注文確認通知、出荷通知。</li>
+<li>商品・在庫・注文を管理する機能。</li>
+<li>配送、返品、問い合わせ、法定表記、プライバシーの案内。</li>
+</ol>
+<h3 id="_5">後から追加しやすい機能</h3>
+<p>会員登録、お気に入り、レビュー、クーポン、ポイント、レコメンド、高度な検索、多言語、多通貨、定期購入、外部倉庫連携。販売モデルに必須のものは初期版へ繰り上げる。</p>
+<p>初期版でも、支払い失敗、返品・返金、出荷変更を扱う運用手順は必要。管理画面を簡略化する場合は、決済サービスの管理画面などで代替できる操作を明確にする。</p>
+<h2 id="7">7. データと業務処理の基本パターン</h2>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>データ</th>
+<th>主な役割</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>商品</td>
+<td>名前、説明、画像、公開状態、カテゴリ</td>
+</tr>
+<tr>
+<td>SKU／バリエーション</td>
+<td>サイズ・色の組み合わせ、価格、販売可能な単位</td>
+</tr>
+<tr>
+<td>在庫</td>
+<td>SKUごとの在庫数、引当数、更新履歴</td>
+</tr>
+<tr>
+<td>カート・カート明細</td>
+<td>購入候補と数量。最終価格の確定前の状態</td>
+</tr>
+<tr>
+<td>注文・注文明細</td>
+<td>購入時点の商品名、単価、税、送料、合計、購入条件を保存</td>
+</tr>
+<tr>
+<td>決済</td>
+<td>決済サービスの識別子、金額、状態、返金情報</td>
+</tr>
+<tr>
+<td>配送</td>
+<td>配送先、配送状態、追跡番号</td>
+</tr>
+<tr>
+<td>購入者</td>
+<td>会員の場合のアカウント。ゲスト注文の連絡先は注文側にも保持</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="_6">設計時に外せない点</h3>
+<ul>
+<li><strong>価格はサーバーで再計算する。</strong> ブラウザから送られた単価や合計を信用しない。通貨に応じた最小単位の整数などを使い、浮動小数点の誤差を避ける。</li>
+<li><strong>注文時の情報を保存する。</strong> 商品情報が更新されても過去の注文内容が変わらないようにする。</li>
+<li><strong>在庫は同時購入を考慮する。</strong> トランザクションや条件付き更新で売り越しを防ぐ。引当のタイミングと期限、失敗時の解放を決める。</li>
+<li><strong>決済は画面への戻りだけで確定しない。</strong> 署名を検証したWebhookなどで結果を確認する。決済方法によっては完了通知が後から届く。</li>
+<li><strong>同じ処理が繰り返されても重複させない。</strong> 決済要求・Webhook・通知・在庫更新に冪等性を持たせる。重複と順序の入れ替わりを想定する。</li>
+<li><strong>注文・決済・配送の状態を分ける。</strong> 「決済済み・未出荷」「一部返金・配送済み」などを表現できるようにする。</li>
+<li><strong>通知失敗と注文失敗を分ける。</strong> メール送信の障害で決済済み注文を失わないようにし、通知を再送できるようにする。</li>
+</ul>
+<p>基本的な状態の例：</p>
+<pre><code class="language-text">注文：受付待ち → 受付済み → 完了／キャンセル
+決済：未払い → 処理中 → 支払済み／失敗 → 一部返金／返金済み
+配送：未出荷 → 準備中 → 出荷済み → 配送済み
+</code></pre>
+<p>実際の遷移は販売モデルに合わせる。例えば、返金と返品は別の処理であり、返金しただけで在庫を自動的に戻す設計にはしない。</p>
+<h2 id="8">8. 日本向け販売で検討する項目</h2>
+<ul>
+<li>消費税込み価格、送料、手数料、割引後の最終支払額の表示。</li>
+<li>軽減税率対象商品など、商品による税率の違いと端数処理。</li>
+<li>郵便番号、都道府県、建物名などを含む住所入力。</li>
+<li>クレジットカード以外の決済方法と、未払い・入金待ちの扱い。</li>
+<li>配送可能地域、送料条件、送料無料の条件、発送までの日数。</li>
+<li>特定商取引法に基づく表示と、注文の最終確認画面で必要になる表示。</li>
+<li>返品・キャンセル条件、問い合わせ窓口、個人情報の利用目的。</li>
+<li>インボイス対応や領収書の必要性。扱う商品・販売先によって判断する。</li>
+</ul>
+<p>法律・サービス仕様に依存する項目は、公開前に最新の一次資料と実際の運用条件を照合する。特に通信販売の返品条件は、他の販売形態のルールをそのまま当てはめない。</p>
+<h2 id="9">9. 開発・公開前に確認する代表的なケース</h2>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>ケース</th>
+<th>確認する結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>通常購入</td>
+<td>正しい合計で決済され、注文・在庫・通知が一致する</td>
+</tr>
+<tr>
+<td>決済失敗／離脱</td>
+<td>支払済みと表示されず、在庫引当を適切に解放する</td>
+</tr>
+<tr>
+<td>二重クリック／Webhook再送</td>
+<td>注文・請求・通知・在庫更新が重複しない</td>
+</tr>
+<tr>
+<td>在庫残り1点への同時購入</td>
+<td>在庫を超える注文を確定しない</td>
+</tr>
+<tr>
+<td>カート投入後の価格・在庫変更</td>
+<td>最新条件を確認し、購入者へ変更を伝える</td>
+</tr>
+<tr>
+<td>不正な単価・数量の送信</td>
+<td>サーバー側で拒否または正しい条件へ再計算する</td>
+</tr>
+<tr>
+<td>他人の注文URLへのアクセス</td>
+<td>注文情報を取得・変更できない</td>
+</tr>
+<tr>
+<td>メール送信の障害</td>
+<td>注文は保持され、通知を再実行できる</td>
+</tr>
+<tr>
+<td>キャンセル／一部返金</td>
+<td>決済、注文、返品後の在庫が業務ルールと一致する</td>
+</tr>
+<tr>
+<td>モバイル・キーボード操作</td>
+<td>商品選択から購入まで操作でき、入力エラーを理解できる</td>
+</tr>
+</tbody>
+</table></div>
+<p>学習用・デモでは決済サービスのテストモードを使う。実販売前には、本番の配送・税・問い合わせ・通知・障害対応を確認する。</p>
+<h2 id="10">10. このプロジェクトで採用した構成</h2>
+<p>更新日：2026年10月1日。対象は単一店舗のPowerPoint資料販売デモで、配送・物理在庫はありません。費用と外部サービス登録が発生しないローカル実装を先行しています。</p>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>設計パターン</th>
+<th>現在の採用方式</th>
+<th>実販売への拡張</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>フロントエンド</td>
+<td>React・TypeScript・Vite。商品別パスとその他のハッシュ画面</td>
+<td>全画面の通常パス化、認証画面</td>
+</tr>
+<tr>
+<td>バックエンド・DB</td>
+<td>Node.jsのJavaScript API、SQLite。Viteの開発／プレビューへ接続</td>
+<td>独立したAPI基盤、PostgreSQL等の選定</td>
+</tr>
+<tr>
+<td>商品・価格</td>
+<td>初期JSONをDBへ取り込み、管理画面で更新。サーバー見積もりと購入時再検証、仮の10%税額と模擬領収書</td>
+<td>実販売の税区分・領収書と本番販売条件</td>
+</tr>
+<tr>
+<td>購入者識別</td>
+<td>ブラウザのCookie。注文の所有者をAPIで照合</td>
+<td>メール認証と端末間の履歴共有</td>
+</tr>
+<tr>
+<td>決済・返金</td>
+<td>成功／失敗の模擬処理、理由付き全額模擬返金</td>
+<td>ホスト型決済・署名検証Webhook・決済照合</td>
+</tr>
+<tr>
+<td>ファイル</td>
+<td>SHA-256でローカル版を固定。LibreOffice画像化・ClamAV接続。期限とCookieを確認するAPIトークン</td>
+<td>非公開オブジェクトストレージと署名付きURL</td>
+</tr>
+<tr>
+<td>通知</td>
+<td>注文と同時に予定通知を保存。5秒周期でローカル保存・再試行</td>
+<td>配信事業者、認証済み宛先、配信結果の照会</td>
+</tr>
+<tr>
+<td>管理・運用</td>
+<td>役割別パスワード・任意のTOTP MFA・返金再認証、CSRF・監査、手動／自動バックアップ・検証・一時領域の復元演習</td>
+<td>独立した認証要素、本番の監視・別媒体保管・保持方針</td>
+</tr>
+<tr>
+<td>販促・分析</td>
+<td>お気に入り、並び替え、クーポン・セット、日別イベント件数</td>
+<td>会員に紐づく保存、実販売向け分析の同意と精度</td>
+</tr>
+</tbody>
+</table></div>
+<p>バックエンドの価格計算・重複防止・購入時スナップショットは実装済みですが、実入金を確定する処理は未実装です。ストレージ署名付きURLとローカルAPIトークンの違い、実際のSQLite構成、画面・APIパスは <a href="local-basic-design.html">ローカル基本設計</a> に記載しています。</p>
+<p>次に決める事項は、販売者情報と販売条件、本人認証・決済・配信の提供事業者、予算、本番の保存期間・障害対応体制です。本番の構成案は <a href="production-basic-design.html">基本設計書（HTML）</a>、初期静的デモは <a href="static-demo-history.html">設計履歴</a> を参照してください。</p>
+<h2 id="11-url">11. 参考URLと追加調査先</h2>
+<p>以下は2026年9月30日に取得を試みたが、ネットワーク制限により本文を確認できなかった。記載内容が現行仕様に一致することや、ページが現在も公開されていることは未検証。</p>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>参考先</th>
+<th>URL</th>
+<th>次に確認する項目</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Baymard Institute</td>
+<td>https://baymard.com/blog/current-state-of-checkout-ux</td>
+<td>チェックアウトUXの研究と改善観点</td>
+</tr>
+<tr>
+<td>Stripe公式ドキュメント</td>
+<td>https://docs.stripe.com/payments/checkout</td>
+<td>ホスト型決済、注文との連携、Webhook、対応する決済方法</td>
+</tr>
+<tr>
+<td>Shopify公式開発者ドキュメント</td>
+<td>https://shopify.dev/01.doc/storefronts/headless</td>
+<td>ヘッドレス構成、Storefront API、チェックアウトの分担</td>
+</tr>
+<tr>
+<td>消費者庁・特定商取引法ガイド</td>
+<td>https://www.no-trouble.caa.go.jp/what/mailorder/</td>
+<td>通信販売の表示、返品条件、最終確認画面</td>
+</tr>
+<tr>
+<td>PCI Security Standards Council</td>
+<td>https://www.pcisecuritystandards.org/merchants/</td>
+<td>決済情報の取り扱いと、採用構成に応じた加盟店の対応範囲</td>
+</tr>
+</tbody>
+</table></div>
+<p>サービスの料金・制限・国内対応を比較する際は、それぞれの公式料金表と仕様を追加確認する。</p></article><footer><p>Slide Market · 学習用ローカルデモ</p><nav aria-label="関連資料"><a href="local-basic-design.html">ローカル基本設計</a><a href="demo-requirements.html">要件・初期設計</a><a href="local-operations.html">ローカル運用手順</a><a href="implementation-status.html">実装状況と残作業</a><a href="production-basic-design.html">実運用に向けた基本設計</a><a href="ec-site-patterns.html" aria-current="page">ECサイトの設計パターン</a><a href="static-demo-history.html">初期の静的デモの説明</a></nav><p><a href="index.html">資料一覧に戻る</a> · <a href="../README.md">README（Markdown）</a></p></footer></main></div></body></html>

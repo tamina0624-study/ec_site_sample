@@ -44,7 +44,7 @@ ec_site_sample/
 │   └── generate-slides.mjs  # PPTXと表紙画像の生成
 ├── tests/
 │   └── shop.spec.ts          # ブラウザでの動作テスト
-├── docs/
+├── 01.doc/
 │   ├── ec-site-patterns.md  # ECサイトの設計パターン整理
 │   └── demo-requirements.md # 要件・初期設計
 ├── index.html              # アプリを読み込むHTML
@@ -128,6 +128,6 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/slide-market-browsers npm test
 
 決済はブラウザ内のシミュレーションです。個人情報・カード情報は入力しません。注文・カートはローカルストレージに保存され、購入証明には使えません。PPTXファイルは公開パスにあるため、購入操作なしでも取得できます。本番販売にはサーバーでの価格計算、決済連携、Webhook検証、注文管理、非公開ファイルのアクセス制御が必要です。
 
-設計資料：`docs/ec-site-patterns.md`、`docs/demo-requirements.md`。
+設計資料：`01.doc/ec-site-patterns.md`、`01.doc/demo-requirements.md`。
 
 実運用に向けた基本設計書：[production-basic-design.html](production-basic-design.html)。HTMLファイルをブラウザで開くと、構成図、機能・画面・データ・API設計、運用・テスト方針を確認できます。印刷・PDF保存にも対応しています。

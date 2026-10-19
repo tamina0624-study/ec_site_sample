@@ -2,7 +2,7 @@ import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {resolve} from 'node:path';
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let products=JSON.parse(readFileSync('src/products.json','utf8'));
+let products=JSON.parse(readFileSync('02.src/src/products.json','utf8'));
 const dbPath=resolve(process.env.SHOP_DATA_DIR||'data','shop.sqlite');
 if(existsSync(dbPath)){const db=new DatabaseSync(dbPath,{readOnly:true});try{const rows=db.prepare("SELECT name FROM sqlite_master WHERE name='documents'").get()?db.prepare("SELECT value FROM documents WHERE kind='products'").all():[];if(rows.length)products=rows.map(r=>JSON.parse(r.value)).filter(p=>p.status==='published');}finally{db.close();}}
 const template=readFileSync('dist/index.html','utf8');

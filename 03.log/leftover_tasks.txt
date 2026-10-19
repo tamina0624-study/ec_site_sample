@@ -1,0 +1,5 @@
+更新日: 2026-10-19
+
+- ビルドのWindows異常終了（0xC0000409）を調査する。依存関係復元後も再現。構成整理時の成功記録と最新の失敗記録はcurrent_status.txt参照。
+- 個人名・会社名などの独自検知語は未設定。必要な場合のみGitSecurityTool/GitSecurityTool/keywords.yamlをローカル編集する。Git除外は設定済み。
+- ブラウザテスト、実Google認証、実変換ツールのテストは今回未実施。既存の機能上の残課題は01.doc/implementation-status.md参照。

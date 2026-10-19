@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Slide Marketのローカル基本設計。ローカルで閲覧・印刷できるプロジェクト資料。">
+<title>ローカル基本設計 | Slide Market 資料</title><link rel="stylesheet" href="assets/documents.css"></head>
+<body><a class="skip" href="#content">本文へ移動</a><header class="masthead"><div class="header-inner"><a class="brand" href="index.html">SLIDE MARKET <span>PROJECT DOCUMENTS</span></a><div class="header-actions"><a href="index.html">資料一覧</a><button type="button" onclick="window.print()">印刷・PDF保存</button></div></div></header>
+<div class="page-heading"><p class="eyebrow">現行仕様</p><h1>ローカル基本設計</h1><p class="meta">HTML版整備：2026年10月19日 · 対象：ec_site_sample</p></div>
+<div class="layout "><aside class="toc" aria-label="ページ内の目次"><p class="eyebrow">CONTENTS</p><a href="#_1">構成と責務</a><a href="#_2">画面と権限</a><a href="#sqlite">SQLiteの実テーブル</a><a href="#api">現行API</a><a href="#_3">状態と業務処理</a><a href="#_4">保護・運用・移行</a><a href="#_5">検証と今後の拡張</a></aside><main id="content" tabindex="-1"><div class="notice"><strong>2026年10月19日の整備・検証状況</strong><p>実装・テストは <code>02.src/</code>、資料は <code>01.doc/</code> に整理済み。サーバー・ファイル処理テスト11件とセキュリティフック検査は成功しています。ビルドは構成整理時に成功しましたが、直近の再実行では変換後にWindows異常終了 <code>0xC0000409</code> が発生し、未解決です。ブラウザ・実Google認証・実外部ツールは今回未検証です。</p><p>以下の本文にある過去の日付・検証記録は当時の結果です。最新の詳細は <a href="implementation-status.html#latest-verification">実装状況と残作業</a> を参照してください。</p></div><article><p>更新日：2026年10月9日。現在のコードを確認して記載した実装仕様です。<a href="../README.md">README</a> は操作手順、<a href="implementation-status.html">実装状況と残作業</a> は現時点の確認結果、<a href="production-basic-design.html">基本設計書（HTML）</a> は将来の実販売設計を扱います。Google OAuthはコード対応済みですが、この環境は資格情報未設定です。実決済・実返金・外部メール送信はありません。</p>
+<h2 id="_1">構成と責務</h2>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>ファイル</th>
+<th>責務</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>02.src/src/main.tsx</code></td>
+<td>店舗、カート、見積もり、同意、模擬購入、注文履歴、ダウンロード</td>
+</tr>
+<tr>
+<td><code>02.src/src/LocalPages.tsx</code></td>
+<td>管理者ログイン、商品・注文・返金・問い合わせ・通知・運用画面、販売条件</td>
+</tr>
+<tr>
+<td><code>02.src/src/AdminSecurity.tsx</code></td>
+<td>MFA設定・解除・復旧コードの表示</td>
+</tr>
+<tr>
+<td><code>02.src/src/api.ts</code></td>
+<td>APIの型、セッション初期化、CSRFヘッダー、ローカル分析イベント</td>
+</tr>
+<tr>
+<td><code>02.src/server/shop.mjs</code></td>
+<td>APIルーティング、所有者・役割・状態の照合、価格・クーポン計算、通知の周期処理</td>
+</tr>
+<tr>
+<td><code>02.src/server/google-auth.mjs</code></td>
+<td>Google OIDC discovery、認可コード・state・nonce・PKCEの検証</td>
+</tr>
+<tr>
+<td><code>02.src/server/assets.mjs</code></td>
+<td>ClamAV検査、外部変換ツール実行、画像キャッシュ</td>
+</tr>
+<tr>
+<td><code>02.src/server/receipts.mjs</code></td>
+<td>購入時の模擬領収書保存と印刷用HTML</td>
+</tr>
+<tr>
+<td><code>02.src/scripts/prepare-assets.mjs</code></td>
+<td>実行ファイル確認・既存ファイル版の準備</td>
+</tr>
+<tr>
+<td><code>02.src/server/security.mjs</code></td>
+<td>TOTP・コードの再利用防止・復旧コード生成</td>
+</tr>
+<tr>
+<td><code>02.src/server/legal.mjs</code></td>
+<td>販売条件本文と購入時の本文保存</td>
+</tr>
+<tr>
+<td><code>02.src/server/pagination.mjs</code></td>
+<td>日時・IDによるカーソルの検証</td>
+</tr>
+<tr>
+<td><code>02.src/server/backups.mjs</code></td>
+<td>DB・ファイルのバックアップ、自動分の保持</td>
+</tr>
+<tr>
+<td><code>02.src/server/storage.mjs</code></td>
+<td>SQLiteの初期化、JSON文書の保存、商品取り込み、パスワードのハッシュ、PPTX検証・版固定</td>
+</tr>
+<tr>
+<td><code>vite.config.mjs</code></td>
+<td>開発・プレビューへAPIを接続。私有ファイルの直接配信を禁止。プレビューで商品別HTMLを返す</td>
+</tr>
+<tr>
+<td><code>02.src/scripts/local-data.mjs</code></td>
+<td>手動バックアップ、検査付き復元、管理パスワード再発行</td>
+</tr>
+<tr>
+<td><code>02.src/scripts/generate-seo.mjs</code></td>
+<td>ビルド時の商品別HTML、メタ情報、構造化データ、サイトマップ、robots.txt</td>
+</tr>
+</tbody>
+</table></div>
+<p>Node.js 24を使用します。商品はAPIから取得し、JSONは初期取り込みに使用します。PPTXは <code>private/downloads/versions/</code> に保存し、注文にはSHA-256のファイル版を記録します。LibreOfficeでPDF化し、pdftoppmで最大12ページのPNGを生成します。data/previewsにSHA-256単位で保存し、公開商品のAPIから取得します。未導入・失敗・キャッシュ欠落時は文字抜粋SVGへ戻します。セットは先頭商品を表示します。プレビューのYu GothicはNoto Sans CJK JPへ置換します。元のPPTXは変更せず、フォントや描画はPowerPointと異なる場合があります。</p>
+<h2 id="_2">画面と権限</h2>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>パス・ハッシュ</th>
+<th>画面</th>
+<th>条件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code>・<code>#home</code></td>
+<td>一覧・検索・並び替え・お気に入り</td>
+<td>公開</td>
+</tr>
+<tr>
+<td><code>/products/商品ID</code>・<code>#product/商品ID</code></td>
+<td>詳細・テキストプレビュー</td>
+<td>公開商品</td>
+</tr>
+<tr>
+<td><code>#cart</code>・<code>#checkout</code></td>
+<td>カート・見積もり・規約同意・模擬購入</td>
+<td>ブラウザセッション</td>
+</tr>
+<tr>
+<td><code>#order/注文ID</code>・<code>#history</code></td>
+<td>注文完了・履歴・取得リンク</td>
+<td>匿名時は同じブラウザ、ログイン時は同じGoogleアカウントの注文</td>
+</tr>
+<tr>
+<td><code>#guide</code>・<code>#contact</code></td>
+<td>ガイド・問い合わせ</td>
+<td>公開</td>
+</tr>
+<tr>
+<td><code>#legal/terms</code>・<code>#legal/privacy</code>・<code>#legal/refund</code>・<code>#legal/commerce</code></td>
+<td>規約・個人情報・返金・特商法の準備用ページ</td>
+<td>公開、実販売者情報は未設定</td>
+</tr>
+<tr>
+<td><code>#admin</code></td>
+<td>管理者ログイン・各管理タブ</td>
+<td>adminは全機能、editorは商品操作・自身の認証設定</td>
+</tr>
+</tbody>
+</table></div>
+<p>購入者は匿名時はCookieで識別し、Google OAuthを設定した環境ではGoogleが検証したメールアドレスとsubjectに対応するアカウントでもログインできます。同じアカウントの注文・お気に入りは端末間で共有します。初回ログイン時に現在のブラウザの匿名注文・お気に入りをアカウントへ引き継ぎます。Google認証はstate・nonce・PKCEを使い、アカウント連携・購入者セッションはHttpOnly Cookieで管理します。ログイン開始時のCookieは <code>SameSite=Lax</code>、本番HTTPSでは <code>SHOP_COOKIE_SECURE=true</code> を設定します。購入者セッションは30日、管理ログインは1時間で失効します。更新APIには <code>X-CSRF-Token</code> が必要です。役割ごとに任意のTOTP MFAを設定できます。30秒・6桁・前後1ステップを許容し、使用済みステップを拒否します。復旧コード8個はハッシュ保存し、各1回のみ使用できます。設定待ちは5分有効。設定確定時に同じ役割の他セッションを解除します。返金はパスワードと設定済みMFAで再認証し、5分有効です。editorもログアウト・自身の認証設定が可能です。</p>
+<h2 id="sqlite">SQLiteの実テーブル</h2>
+<p><code>data/shop.sqlite</code> をWAL・外部キー有効で利用します。以下は本番設計のPostgreSQLテーブル案とは別の、現行スキーマです。</p>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>テーブル</th>
+<th>主な項目・役割</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>accounts</td>
+<td>id（Google subject）、email、name、created_at、updated_at。Googleアカウント</td>
+</tr>
+<tr>
+<td>sessions</td>
+<td>id。ブラウザセッションの識別子</td>
+</tr>
+<tr>
+<td>local_sessions</td>
+<td>id、role、expires、csrf、account_id。セッションの権限・期限・任意の購入者アカウント</td>
+</tr>
+<tr>
+<td>orders</td>
+<td>id、session_id、account_id、date、total、request_key、request_body。session_idとrequest_keyの組合せ一意</td>
+</tr>
+<tr>
+<td>items</td>
+<td>order_id、product_id、name、price。注文削除時に連動削除、order_idとproduct_idの組合せ一意</td>
+</tr>
+<tr>
+<td>documents</td>
+<td>kind、id、value（JSON）。kindとidの組合せ一意</td>
+</tr>
+<tr>
+<td>favorites</td>
+<td>session_id、product_id。組合せ一意</td>
+</tr>
+<tr>
+<td>account_favorites</td>
+<td>account_id、product_id。アカウント単位のお気に入り</td>
+</tr>
+<tr>
+<td>download_tokens</td>
+<td>token_hash、session_id、order_id、product_id、expires。取得時にも照合</td>
+</tr>
+<tr>
+<td>metrics</td>
+<td>day、event、count。UTC日付とイベントの組合せ一意</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>documents.kind</code> は <code>products</code>、<code>versions</code>、<code>quotes</code>、<code>orderMeta</code>、<code>credentials</code>、<code>coupons</code>、<code>inquiries</code>、<code>notifications</code>、<code>audit</code>、<code>errors</code>、<code>mfaPending</code>、<code>reauth</code>、<code>maintenance</code> です。商品、状態、通知をそれぞれ独立した専用テーブルへ正規化する設計は本番向けの拡張案です。</p>
+<p><code>orderMeta</code> にはstatus、terms、acceptedAt、discount、購入時のlines（商品ID・名称・価格・ファイル版）、購入商品IDを保存します。明細のpriceは単品価格で、セット・割引後の支払総額はorders.totalが正本です。<code>licenseSnapshot</code> に規約版と利用規約・返金条件の本文を保存します。旧注文に本文がなければ後から当時の本文を捏造しません。<code>receiptSnapshot</code> に購入時の単品／セット販売価格・小計・割引・合計・仮の10%税額を保存します。税額はfloor(total / 11)、税抜はtotalとの差額。実販売の税区分・適格請求書は未実装です。旧注文に領収書データがなければ生成しません。</p>
+<h2 id="api">現行API</h2>
+<p>GETもブラウザセッションを利用します。更新処理はセッションAPIのCSRFトークンを付けます。エラー形式は <code>{ code, message, requestId, details? }</code>、ヘッダーは <code>X-Request-Id</code>。確認番号を画面とerrors文書へ記録します。取得トークンをエラー記録へ残しません。400入力不正、401管理パスワード不一致、403権限・CSRF、404不存在・所有者不一致・権限停止、409失効・変更・競合、413サイズ超過、429回数制限、500処理障害を返します。購入履歴・管理注文・監査は <code>{ items, nextCursor }</code>。limitは既定20・最大100。日時降順とID降順によるSQLのキーセット方式で、同時刻の行も欠落・重複しません。cursorは日時とIDのBase64url JSONで、不正な値は400です。</p>
+<div class="table-scroll" role="region" aria-label="資料の表" tabindex="0"><table>
+<thead>
+<tr>
+<th>メソッド・パス</th>
+<th>入出力・役割</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET /api/session</td>
+<td>role、csrf、termsVersion、account、googleAuthConfigured</td>
+</tr>
+<tr>
+<td>GET /api/auth/google、GET /api/auth/google/callback</td>
+<td>Google OIDC開始・state/nonce/PKCE検証後のログイン</td>
+</tr>
+<tr>
+<td>POST /api/auth/logout</td>
+<td>購入者アカウントのログアウト</td>
+</tr>
+<tr>
+<td>GET /api/products</td>
+<td>公開商品の情報。検索と並び替えは画面側</td>
+</tr>
+<tr>
+<td>GET /api/products/:id/previews/:index</td>
+<td>0から始まるページのテキストプレビューSVG</td>
+</tr>
+<tr>
+<td>GET・POST /api/favorites、DELETE /api/favorites/:id</td>
+<td>お気に入り取得・登録・削除</td>
+</tr>
+<tr>
+<td>POST /api/metrics</td>
+<td>view、cart、checkout。購入件数は注文確定時にサーバーで記録</td>
+</tr>
+<tr>
+<td>POST /api/quotes</td>
+<td>items、coupon → id、価格内訳、lines、期限、terms</td>
+</tr>
+<tr>
+<td>GET /api/orders/:id/receipt</td>
+<td>所有者限定の模擬領収書HTML。download=1で保存、返金後は状態を明示</td>
+</tr>
+<tr>
+<td>GET /api/orders、GET /api/orders/:id</td>
+<td>ページ化した自分の注文、所有者限定の個別取得</td>
+</tr>
+<tr>
+<td>GET /api/purchases</td>
+<td>全paid注文から購入済み商品と再取得先を取得</td>
+</tr>
+<tr>
+<td>GET /api/legal</td>
+<td>規約版と販売条件本文</td>
+</tr>
+<tr>
+<td>POST /api/orders</td>
+<td>quoteId、result、accepted、termsVersion。Idempotency-Key必須</td>
+</tr>
+<tr>
+<td>DELETE /api/orders</td>
+<td>自分のデモ注文と取得トークンを削除</td>
+</tr>
+<tr>
+<td>POST /api/orders/:id/download-links/:productId</td>
+<td>所有するpaid注文から5分有効のurl・expiresAtを発行。ログイン済みアカウントは別端末でも再発行可能</td>
+</tr>
+<tr>
+<td>GET /api/downloads/:token</td>
+<td>期限、ブラウザ、注文状態を照合して購入時のPPTXを配信</td>
+</tr>
+<tr>
+<td>POST /api/inquiries</td>
+<td>email、category、body、任意の自分のorderId → 受付id</td>
+</tr>
+<tr>
+<td>POST /api/admin/login、POST /api/admin/logout</td>
+<td>パスワード・任意のrole・設定済みMFAのcodeで管理ログイン、CSRF更新、ログアウト</td>
+</tr>
+<tr>
+<td>POST /api/admin/reauth</td>
+<td>パスワード・設定済みMFAで5分の返金再認証</td>
+</tr>
+<tr>
+<td>GET /api/admin/security/status</td>
+<td>自分の役割のMFA状態・復旧コード残数</td>
+</tr>
+<tr>
+<td>POST /api/admin/security/mfa/setup、confirm、disable</td>
+<td>パスワードで準備、コードで確定、再認証して解除</td>
+</tr>
+<tr>
+<td>GET・POST /api/admin/products、PATCH /api/admin/products/:id</td>
+<td>商品一覧・新規登録・revision付き編集</td>
+</tr>
+<tr>
+<td>POST /api/admin/products/:id/file</td>
+<td>revision、base64のPPTX。検証して商品版を更新</td>
+</tr>
+<tr>
+<td>POST /api/admin/products/:id/prepare</td>
+<td>revision指定で既存版を検査・PNG化。商品管理者も利用可能</td>
+</tr>
+<tr>
+<td>GET /api/admin/orders?q=検索語</td>
+<td>注文番号・商品名・状態の検索</td>
+</tr>
+<tr>
+<td>POST /api/admin/orders/:id/refund</td>
+<td>reason必須。注文単位で重複しない全額模擬返金</td>
+</tr>
+<tr>
+<td>GET /api/admin/inquiries、PATCH /api/admin/inquiries/:id</td>
+<td>問い合わせ一覧、status更新</td>
+</tr>
+<tr>
+<td>GET・POST /api/admin/coupons</td>
+<td>クーポン一覧・code、percent、limit、expiresで登録</td>
+</tr>
+<tr>
+<td>GET /api/admin/notifications</td>
+<td>通知の本文と処理状況</td>
+</tr>
+<tr>
+<td>POST /api/admin/notifications/run</td>
+<td>ローカル保存処理。simulateFailureで失敗を模擬</td>
+</tr>
+<tr>
+<td>POST /api/admin/notifications/:id/retry</td>
+<td>試行回数を戻し、再処理を予約</td>
+</tr>
+<tr>
+<td>GET /api/admin/audit、GET /api/admin/health</td>
+<td>管理操作履歴、DB・通知の状況と日別集計</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>/api/products/:id</code>、Checkout・WebhookのAPI、外部ストレージのアップロードAPIは未実装です。個別の注文画面は所有者限定の詳細APIから表示します。editorの業務操作は商品管理に限定し、返金・問い合わせ・通知・集計はadmin専用です。editorもログアウト・認証設定・再認証を利用できますが、返金等のadmin専用操作は拒否します。</p>
+<h2 id="_3">状態と業務処理</h2>
+<ol>
+<li>カートの商品IDとクーポンから10分有効の見積もりを作成する。数量1、セットと単品の重複は拒否する。</li>
+<li>利用規約・返金条件への同意後に模擬決済を要求する。規約版は <code>local-2026-10-01</code>。</li>
+<li>商品の公開状態・revision・ファイル版・価格・クーポン上限を再照合する。変更・失効時は409で再確認を要求する。</li>
+<li>failureは402を返し注文を作らない。successはpaid注文・明細・規約同意・予定通知を同じトランザクションで保存する。実際の入金は照合しない。</li>
+<li>同じ操作キー・本文の再送は同じ注文を返す。キーが同じでも本文が異なる場合は409。同じ見積もりの別キー消費も拒否する。</li>
+<li>ダウンロード発行時と取得時にpaid注文の所有権を確認する。匿名注文は同じブラウザに限定し、ログイン時はアカウント所有者として別端末からリンクを再発行できる。APIトークン方式であり、外部ストレージの署名付きURLではない。</li>
+<li>管理者の模擬返金はpaid → refunded。理由・時刻・監査・予定通知を保存し、発行済みトークンを削除する。返金済みの再要求は返金を繰り返さない。実決済の返金要求中・失敗・異議申し立ては未実装。</li>
+</ol>
+<p>商品はdraft／published／stopped。問い合わせはopen／handling／closed。通知はpending → savedで、5秒周期に期限の到来した予定通知を処理します。失敗の模擬では指数バックオフ、最大8回でfailed。手動retryでpendingへ戻します。savedは「ローカル保存完了」であり「外部メール送信成功」ではありません。通知IDは購入・返金・問い合わせごとに固定して重複作成を防ぎます。</p>
+<p>クーポンは期限・割引率・利用上限をサーバーで判定し、注文と同じトランザクションで消費します。返金しても利用回数は戻しません。全paid注文を対象に購入済みを判定し、商品画面から元の注文へ案内します。セット内の一部でも購入済みなら重複購入を拒否します。見積もり時と注文確定時の両方で確認し、古い見積もりによる再購入も防ぎます。返金・リセット後は対象から外れます。</p>
+<h2 id="_4">保護・運用・移行</h2>
+<ul>
+<li>CookieはHttpOnly・SameSite=Lax。ローカルHTTPではSecure属性を付けず、本番HTTPSでは <code>SHOP_COOKIE_SECURE=true</code> を設定する。OAuthコールバックはGoogleからのトップレベルGETとしてstate照合する。</li>
+<li>回数制限はメモリ上の1分窓。セッション全体300回、ログインは接続元IPで10回、問い合わせはセッション5回・IP30回、ダウンロードは発行と取得合算で30回、アップロード10回、分析60回。再起動でカウンタはリセットされる。</li>
+<li>PPTXは50MB、ZIP展開合計100MB、1500エントリ、1〜200ページまで。マクロ・埋め込みファイル・危険なパスを拒否し、未検証のSVGはアップロードしない。ClamAV接続を実装。autoは実行ファイル不在なら未検査、requiredは未完了を拒否、offはdisabledとして記録する。定義不足・実行失敗は503、問題検出は400で登録を拒否する。既存の同じ版の検出結果も記録し、infectedは購入・公開・ダウンロード・プレビューを拒否する。</li>
+<li>初期SQLite版の注文には現在のファイルで版を固定する。過去時点の版は復元できない。既存Cookieを引き継ぐが、localStorageだけのデモ注文は移行しない。</li>
+<li>リセットは現在の匿名セッションの注文・取得トークンを削除し、orderMetaをresetにする。ログイン中はアカウント所有の注文を削除せず、通知・問い合わせ・監査も残す。匿名のお気に入りは残し、アカウントのお気に入りは別端末から利用できる。</li>
+<li><code>npm run backup</code> は稼働中もSQLiteのバックアップAPIを利用できる。<code>npm run restore -- バックアップ名</code> と <code>npm run admin:reset</code> はサーバー停止後に実行する。復元前に現在のデータも退避する。</li>
+<li>復元はDBとファイルのSHA-256、SQLite整合性・外部キー、商品と購入時ファイルの存在を検証する。バックアップにはDB内の管理資格情報も含むが、パスワードの平文ファイルは含まない。復元後に平文ファイルとDBの資格情報が異なる場合はadmin:resetで再発行する。</li>
+<li><code>SHOP_DATA_DIR</code>、<code>SHOP_FILE_DIR</code>、<code>SHOP_BACKUP_DIR</code> で保存先を指定できる。<code>LOCAL_ADMIN_PASSWORD</code> と <code>LOCAL_EDITOR_PASSWORD</code> は資格情報の初回作成時のみ参照する。機密値をGitへ保存しない。</li>
+<li>
+<p>商品別SEOはビルド時点の公開商品から生成する。DBが未初期化ならJSONを使う。既定のrobots.txtは全体のクロールを禁止。SITE_URLを指定したビルドでは通常のサイトマップを生成するが、これだけで本番運用の準備が完了するわけではない。</p>
+</li>
+<li>
+<p>自動バックアップは5秒周期の確認で初回と以後24時間ごと、直近7件を保持。停止中は実行しない。<code>SHOP_BACKUP_INTERVAL_MS=0</code> で無効、<code>SHOP_BACKUP_KEEP</code> は1〜365。自動分のみ削除し、手動分は保持する。失敗時は最大5分後に再試行し、maintenance文書と運用画面で状態を確認する。</p>
+</li>
+<li>
+<p>バックアップはMFA秘密情報も含む。TOTPのローカル確認は <code>npm run admin:otp</code>（editorは <code>-- editor</code>）。同じ端末の生成は独立した第二要素ではない。紛失時のadmin:resetはMFA・復旧コードと管理セッションも解除する。</p>
+</li>
+<li>
+<p>外部参照・XML実体を変換前に拒否する。変換はシェルを使わず実行し、各ツール90秒で打ち切る。管理APIの処理は同時に1件、競合はASSET_BUSY。変換は一時プロファイルでマクロを無効化するが、OS隔離は未実装。</p>
+</li>
+<li><code>npm run backup:list</code> で一覧、<code>backup:check -- 名前</code> で検証、<code>restore:drill -- 名前</code> で一時領域へコピーして再検証する。稼働中のデータは変更しない。画像キャッシュはバックアップ対象外、必要なら復元後に再生成する。</li>
+<li>ツール設定・検査モード・定義準備・復元確認は <a href="local-operations.html">ローカル運用手順</a> を参照する。</li>
+</ul>
+<h2 id="_5">検証と今後の拡張</h2>
+<p><code>npm run build</code>、<code>npm run test:server</code>、<code>CHROMIUM_PATH=/usr/bin/chromium npm test</code> を使用します。2026年10月9日時点でbuildとサーバー・ファイル処理テスト11件は成功。Google OIDCは外部接続をモックしたアカウント引継ぎ・端末間共有を検証済みですが、実Google認証は資格情報未設定のため未確認です。PlaywrightはChromiumのOS依存ライブラリ不足でブラウザケース未完了です。詳細は <a href="implementation-status.html">実装状況と残作業</a> を参照してください。</p>
+<p>残作業はGoogle Cloud資格情報の設定と実アカウントでの確認、実決済・Webhook・返金照会、メール配信、アカウント削除と個人情報保持方針、本番DB・ストレージ・監視、販売条件の確定、ウイルス定義更新・変換処理のOS隔離、別媒体バックアップです。カーソルページング、codeとrequestId付きエラー、利用許諾本文のスナップショットはローカル実装済みです。専用テーブルへの正規化は本番拡張案です。</p></article><footer><p>Slide Market · 学習用ローカルデモ</p><nav aria-label="関連資料"><a href="local-basic-design.html" aria-current="page">ローカル基本設計</a><a href="demo-requirements.html">要件・初期設計</a><a href="local-operations.html">ローカル運用手順</a><a href="implementation-status.html">実装状況と残作業</a><a href="production-basic-design.html">実運用に向けた基本設計</a><a href="ec-site-patterns.html">ECサイトの設計パターン</a><a href="static-demo-history.html">初期の静的デモの説明</a></nav><p><a href="index.html">資料一覧に戻る</a> · <a href="../README.md">README（Markdown）</a></p></footer></main></div></body></html>
